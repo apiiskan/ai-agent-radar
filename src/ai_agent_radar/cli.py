@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from .config import load_config
+from .config import ConfigurationError, load_config
 from .github import GitHubClient
 from .news import collect_news
 from .pipeline import PipelineDependencies, run_pipeline
@@ -51,7 +51,7 @@ def main(
     config_path = args.config if args.config.is_absolute() else root / args.config
     try:
         config = load_config(config_path)
-    except (OSError, ValueError) as exc:
+    except ConfigurationError as exc:
         _print_error(str(exc))
         return 2
     day = args.date or datetime.now(ZoneInfo(config.timezone)).date()
@@ -90,6 +90,9 @@ def main(
                 dependencies,
                 publish=args.publish,
             )
+    except ConfigurationError as exc:
+        _print_error(str(exc))
+        return 2
     except Exception:
         _print_error("pipeline failed")
         return 1

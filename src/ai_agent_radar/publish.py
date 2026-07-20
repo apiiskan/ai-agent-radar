@@ -20,17 +20,7 @@ class IssuePublisher:
 
     def upsert(self, title: str, body: str, label: str) -> str:
         base_url = f"https://api.github.com/repos/{self.repository}/issues"
-        response = self.client.get(
-            base_url,
-            headers=self.headers,
-            params={"state": "open", "labels": label, "per_page": 100},
-            timeout=20,
-        )
-        response.raise_for_status()
-        issue = next(
-            (item for item in response.json() if item.get("title", title) == title),
-            None,
-        )
+        issue = self._find_issue(base_url, title, label)
         if issue:
             result = self.client.patch(
                 f"{base_url}/{issue['number']}",
@@ -47,3 +37,50 @@ class IssuePublisher:
             )
         result.raise_for_status()
         return result.json()["html_url"]
+
+    def _find_issue(self, base_url: str, title: str, label: str) -> dict | None:
+        url: str | httpx.URL = base_url
+        params: dict[str, str | int] | None = {
+            "state": "all",
+            "labels": label,
+            "per_page": 100,
+            "page": 1,
+        }
+        while True:
+            response = self.client.get(
+                url,
+                headers=self.headers,
+                params=params,
+                timeout=20,
+            )
+            response.raise_for_status()
+            items = response.json()
+            if not isinstance(items, list):
+                raise ValueError("GitHub issues response must be a JSON array")
+            issue = next(
+                (
+                    item
+                    for item in items
+                    if isinstance(item, dict) and item.get("title") == title
+                ),
+                None,
+            )
+            if issue is not None:
+                return issue
+
+            next_url = response.links.get("next", {}).get("url")
+            if next_url:
+                url = next_url
+                params = None
+                continue
+            if len(items) < 100:
+                return None
+
+            current_page = int(response.request.url.params.get("page", "1"))
+            url = base_url
+            params = {
+                "state": "all",
+                "labels": label,
+                "per_page": 100,
+                "page": current_page + 1,
+            }

@@ -188,7 +188,7 @@ def test_weekly_pipeline_uses_iso_week_history_bundles_and_issue_upsert(
 
 
 def test_pipeline_merges_source_state_and_compacts_snapshots_after_90_days(
-    repo_factory, tmp_path, config_path
+    tmp_path, config_path
 ) -> None:
     state_path = tmp_path / "data/state/sources.json"
     state_path.parent.mkdir(parents=True)
@@ -223,17 +223,12 @@ def test_pipeline_merges_source_state_and_compacts_snapshots_after_90_days(
     )
     dependencies = PipelineDependencies(
         collect_github=lambda config: GitHubCollection(
-            repositories=(repo_factory(has_skill_md=True),),
+            repositories=(),
             statuses=(SourceStatus(name="github:test", ok=False, error="Timeout"),),
             rate_remaining=None,
         ),
         collect_news=lambda feeds: NewsCollection(items=(), statuses=()),
-        summarize=lambda repo, score: ProjectSummary(
-            one_line=repo.description,
-            audience="开发者",
-            why_now="；".join(score.reasons),
-            enhanced=False,
-        ),
+        summarize=lambda repo, score: pytest.fail("failed sources return no repositories"),
     )
 
     result = run_pipeline("daily", date(2026, 7, 20), tmp_path, config_path, dependencies)
@@ -270,3 +265,108 @@ def test_pipeline_rejects_publish_without_publisher_before_collecting(
         )
 
     assert collected is False
+
+
+def _dependencies_with_news(repo_factory, items) -> PipelineDependencies:
+    return PipelineDependencies(
+        collect_github=lambda config: GitHubCollection(
+            repositories=(repo_factory(has_skill_md=True),),
+            statuses=(SourceStatus(name="github:test", ok=True, item_count=1),),
+            rate_remaining=100,
+        ),
+        collect_news=lambda feeds: NewsCollection(items=tuple(items), statuses=()),
+        summarize=lambda repo, score: ProjectSummary(
+            one_line=repo.description,
+            audience="开发者",
+            why_now="；".join(score.reasons),
+            enhanced=False,
+        ),
+    )
+
+
+def _news_at(title: str, published_at: datetime) -> NewsRecord:
+    return NewsRecord(
+        canonical_url=f"https://example.com/{title}",
+        title=title,
+        source="Official",
+        tier="official",
+        published_at=published_at,
+    )
+
+
+def test_daily_news_window_uses_exact_local_0800_boundaries(
+    repo_factory, tmp_path, config_path
+) -> None:
+    dependencies = _dependencies_with_news(
+        repo_factory,
+        [
+            _news_at("daily-start", datetime(2026, 7, 19, 0, 0, tzinfo=timezone.utc)),
+            _news_at("daily-end", datetime(2026, 7, 20, 0, 0, tzinfo=timezone.utc)),
+            _news_at(
+                "daily-before", datetime(2026, 7, 18, 23, 59, 59, tzinfo=timezone.utc)
+            ),
+            _news_at(
+                "daily-after", datetime(2026, 7, 20, 0, 0, 1, tzinfo=timezone.utc)
+            ),
+        ],
+    )
+
+    result = run_pipeline("daily", date(2026, 7, 20), tmp_path, config_path, dependencies)
+    report = Path(result.report_path).read_text(encoding="utf-8")
+
+    assert "daily-start" in report
+    assert "daily-end" in report
+    assert "daily-before" not in report
+    assert "daily-after" not in report
+
+
+def test_weekly_news_window_uses_exact_local_0830_boundaries(
+    repo_factory, tmp_path, config_path
+) -> None:
+    dependencies = _dependencies_with_news(
+        repo_factory,
+        [
+            _news_at("weekly-start", datetime(2026, 7, 13, 0, 30, tzinfo=timezone.utc)),
+            _news_at("weekly-end", datetime(2026, 7, 20, 0, 30, tzinfo=timezone.utc)),
+            _news_at(
+                "weekly-before", datetime(2026, 7, 13, 0, 29, 59, tzinfo=timezone.utc)
+            ),
+            _news_at(
+                "weekly-after", datetime(2026, 7, 20, 0, 30, 1, tzinfo=timezone.utc)
+            ),
+        ],
+    )
+
+    result = run_pipeline("weekly", date(2026, 7, 20), tmp_path, config_path, dependencies)
+    report = Path(result.report_path).read_text(encoding="utf-8")
+
+    assert "weekly-start" in report
+    assert "weekly-end" in report
+    assert "weekly-before" not in report
+    assert "weekly-after" not in report
+
+
+def test_daily_news_window_is_24_elapsed_hours_in_configured_timezone(
+    repo_factory, tmp_path, config_path
+) -> None:
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            "timezone: Asia/Shanghai", "timezone: America/New_York"
+        ),
+        encoding="utf-8",
+    )
+    dependencies = _dependencies_with_news(
+        repo_factory,
+        [
+            _news_at("dst-start", datetime(2026, 3, 7, 12, 0, tzinfo=timezone.utc)),
+            _news_at(
+                "dst-before", datetime(2026, 3, 7, 11, 59, 59, tzinfo=timezone.utc)
+            ),
+        ],
+    )
+
+    result = run_pipeline("daily", date(2026, 3, 8), tmp_path, config_path, dependencies)
+    report = Path(result.report_path).read_text(encoding="utf-8")
+
+    assert "dst-start" in report
+    assert "dst-before" not in report

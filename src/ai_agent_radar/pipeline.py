@@ -47,6 +47,14 @@ def _report_items(
     return tuple((repo, score, summary) for repo, score, summary, _ in rows[:limit])
 
 
+def _report_window(
+    mode: str, day: date, local_zone: ZoneInfo
+) -> tuple[datetime, datetime]:
+    end_time = time(hour=8, minute=30 if mode == "weekly" else 0)
+    end = datetime.combine(day, end_time, tzinfo=local_zone).astimezone(timezone.utc)
+    return end - timedelta(days=7 if mode == "weekly" else 1), end
+
+
 def run_pipeline(
     mode: str,
     day: date,
@@ -69,7 +77,8 @@ def run_pipeline(
     )
     history = _load_history(root, day)
     local_zone = ZoneInfo(config.timezone)
-    now = datetime.combine(day, time(hour=8), tzinfo=local_zone).astimezone(timezone.utc)
+    news_start, news_end = _report_window(mode, day, local_zone)
+    now = news_end
 
     rows: list[PipelineRow] = []
     snapshots_by_id: dict[int, RepoSnapshot] = {}
@@ -119,13 +128,10 @@ def run_pipeline(
         if item.repository_id not in current_ids
     )
 
-    lookback_days = 1 if mode == "daily" else 7
     fresh_news = tuple(
         item
         for item in news_result.items
-        if 0
-        <= (day - item.published_at.astimezone(local_zone).date()).days
-        <= lookback_days
+        if news_start <= item.published_at.astimezone(timezone.utc) <= news_end
     )
     statuses = merge_source_state(
         root / "data/state/sources.json",

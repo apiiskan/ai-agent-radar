@@ -1,9 +1,13 @@
 from pathlib import Path
 from typing import Literal
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 from pydantic import BaseModel, Field, model_validator
+
+
+class ConfigurationError(ValueError):
+    """A normalized failure to read or validate radar configuration."""
 
 
 class FeedConfig(BaseModel):
@@ -50,5 +54,12 @@ class RadarConfig(BaseModel):
 
 
 def load_config(path: Path) -> RadarConfig:
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    return RadarConfig.model_validate(data)
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ConfigurationError(f"unable to read radar configuration: {path}") from exc
+    try:
+        data = yaml.safe_load(content)
+        return RadarConfig.model_validate(data)
+    except (ValueError, yaml.YAMLError, ZoneInfoNotFoundError) as exc:
+        raise ConfigurationError(f"invalid radar configuration: {exc}") from exc
