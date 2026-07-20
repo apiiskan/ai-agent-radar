@@ -56,7 +56,7 @@ class RadarConfig(BaseModel):
 def load_config(path: Path) -> RadarConfig:
     try:
         content = path.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeError) as exc:
         raise ConfigurationError(f"unable to read radar configuration: {path}") from exc
     try:
         data = yaml.safe_load(content)

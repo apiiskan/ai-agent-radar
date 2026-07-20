@@ -61,7 +61,9 @@ class IssuePublisher:
                 (
                     item
                     for item in items
-                    if isinstance(item, dict) and item.get("title") == title
+                    if isinstance(item, dict)
+                    and "pull_request" not in item
+                    and item.get("title") == title
                 ),
                 None,
             )

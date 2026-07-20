@@ -83,6 +83,36 @@ def test_upsert_updates_exact_match_on_second_page() -> None:
     assert not any(request.method == "POST" for request in requests)
 
 
+def test_upsert_ignores_pull_request_with_exact_title() -> None:
+    requests: list[httpx.Request] = []
+    title = "AI Agent Radar 日报 · 2026-07-20"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "number": 10,
+                        "title": title,
+                        "pull_request": {"url": "https://api.github.com/repos/o/r/pulls/10"},
+                    },
+                    {"number": 11, "title": title},
+                ],
+            )
+        return httpx.Response(200, json={"html_url": "https://github.com/o/r/issues/11"})
+
+    url = _publisher(handler).upsert(title, "body", "radar-daily")
+
+    assert url.endswith("/11")
+    assert any(
+        request.method == "PATCH" and request.url.path.endswith("/issues/11")
+        for request in requests
+    )
+    assert not any(request.url.path.endswith("/issues/10") for request in requests)
+
+
 def test_upsert_creates_issue_when_no_title_matches() -> None:
     requests: list[httpx.Request] = []
 

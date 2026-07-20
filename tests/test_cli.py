@@ -185,6 +185,21 @@ def test_cli_returns_two_for_missing_or_unreadable_config(
     assert json.loads(capsys.readouterr().out)["ok"] is False
 
 
+def test_real_cli_returns_two_for_invalid_utf8_config(tmp_path, capsys) -> None:
+    config_path = tmp_path / "radar.yaml"
+    config_path.write_bytes(b"timezone: Asia/Shanghai\n\xff")
+
+    exit_code = cli.main(
+        ["daily", "--date", "2026-07-20", "--config", str(config_path)],
+        {"GITHUB_TOKEN": "top-secret"},
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 2
+    assert json.loads(output)["ok"] is False
+    assert "top-secret" not in output
+
+
 def test_real_cli_pipeline_writes_degraded_report_when_all_sources_fail(
     tmp_path, config_path, monkeypatch, capsys
 ) -> None:

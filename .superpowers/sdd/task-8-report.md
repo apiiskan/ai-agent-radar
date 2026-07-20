@@ -142,3 +142,18 @@ Commit base for this follow-up: `831830c`.
 - Performance: Issue listing remains bounded to 100 items per request and stops on a short page; no extra collection passes were introduced.
 
 Follow-up concerns: none.
+
+## Final boundary correction
+
+Base commit: `4a01986`.
+
+- RED command: `PYTHONPATH=src .venv/bin/python -m pytest tests/test_cli.py::test_real_cli_returns_two_for_invalid_utf8_config tests/test_publish.py::test_upsert_ignores_pull_request_with_exact_title -q`.
+- RED result: `2 failed in 0.10s`; invalid UTF-8 escaped `load_config` as `UnicodeDecodeError`, and an exact-title pull request was selected instead of the following real Issue.
+- GREEN result for the same command: `2 passed in 0.05s`.
+- Focused command: `PYTHONPATH=src .venv/bin/python -m pytest tests/test_config.py tests/test_cli.py tests/test_publish.py -q` → `24 passed in 0.10s`.
+- Changed-file Ruff command → `All checks passed!`.
+- Full suite, run once after these corrections: `PYTHONPATH=src .venv/bin/python -m pytest -q` → `90 passed in 0.16s`.
+- Files: `src/ai_agent_radar/config.py` now normalizes decoding failures as `ConfigurationError`; `src/ai_agent_radar/publish.py` excludes entries containing `pull_request`; regressions are in `tests/test_cli.py` and `tests/test_publish.py`.
+- Final self-review: exception classification remains limited to configuration reads, PR exclusion is part of the exact-match predicate before pagination returns, outputs remain secret-safe, and no unrelated interfaces changed.
+
+Final correction concerns: none.
