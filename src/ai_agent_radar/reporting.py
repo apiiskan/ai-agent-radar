@@ -30,7 +30,12 @@ class ReportBundle:
     statuses: tuple[SourceStatus, ...]
 
 
-def render_daily(day: date, bundle: ReportBundle, top_limit: int = 10) -> str:
+def render_daily(
+    day: date,
+    bundle: ReportBundle,
+    top_limit: int = 10,
+    ranked_count: int | None = None,
+) -> str:
     """Render the daily report with a deterministic ordering and item limit."""
     _validate_limit(top_limit)
     lines = [
@@ -38,7 +43,12 @@ def render_daily(day: date, bundle: ReportBundle, top_limit: int = 10) -> str:
         "",
         "## 今日摘要",
         "",
-        f"发现并排名 {len(bundle.ranked)} 个项目，收录 {len(bundle.news)} 条资讯。",
+        (
+            f"共排名 {ranked_count} 个项目，展示前 {len(bundle.ranked)} 个，"
+            f"收录 {len(bundle.news)} 条资讯。"
+            if ranked_count is not None
+            else f"发现并排名 {len(bundle.ranked)} 个项目，收录 {len(bundle.news)} 条资讯。"
+        ),
         "",
     ]
     for title, items in (
@@ -124,7 +134,7 @@ def _repo_lines(items: tuple[RankedItem, ...]) -> list[str]:
     if not items:
         return ["- 暂无符合质量门槛的条目。"]
     return [
-        f"{index}. {_link_or_text(repo.full_name, repo.url)} — {_escape_text(summary.one_line)}  \n"
+        f"{index}. {_link_or_text(repo.full_name, repo.url)} — {_escape_text(summary.one_line)}\n"
         f"   综合分 `{score.total:g}`；{_reasons_text(score.reasons)}"
         for index, (repo, score, summary) in enumerate(items, 1)
     ]

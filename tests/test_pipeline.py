@@ -82,6 +82,42 @@ def test_daily_pipeline_writes_original_paths_counts_and_no_issue(
     assert "Shanghai today" in Path(result.report_path).read_text(encoding="utf-8")
 
 
+def test_daily_pipeline_reports_total_ranked_beyond_display_limit(
+    repo_factory, tmp_path, config_path
+) -> None:
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace("daily_top: 10", "daily_top: 1"),
+        encoding="utf-8",
+    )
+    dependencies = PipelineDependencies(
+        collect_github=lambda config: GitHubCollection(
+            repositories=(
+                repo_factory(has_skill_md=True),
+                repo_factory(
+                    repository_id=2,
+                    full_name="acme/second-agent",
+                    has_skill_md=True,
+                ),
+            ),
+            statuses=(SourceStatus(name="github:test", ok=True, item_count=2),),
+            rate_remaining=100,
+        ),
+        collect_news=lambda feeds: NewsCollection(items=(), statuses=()),
+        summarize=lambda repo, score: ProjectSummary(
+            one_line=repo.description,
+            audience="开发者",
+            why_now="；".join(score.reasons),
+            enhanced=False,
+        ),
+    )
+
+    result = run_pipeline("daily", date(2026, 7, 20), tmp_path, config_path, dependencies)
+    report = Path(result.report_path).read_text(encoding="utf-8")
+
+    assert result.ranked == 2
+    assert "共排名 2 个项目，展示前 1 个" in report
+
+
 def test_relative_config_and_repeated_date_overwrite_the_same_outputs(
     fixed_dependencies, tmp_path, config_path
 ) -> None:

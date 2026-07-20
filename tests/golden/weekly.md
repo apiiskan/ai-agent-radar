@@ -2,12 +2,12 @@
 
 ## 综合热度 Top 20
 
-1. [acme/agent-skill](https://github.com/acme/agent-skill) — 一个实用 Agent Skill  
+1. [acme/agent-skill](https://github.com/acme/agent-skill) — 一个实用 Agent Skill
    综合分 `62`；7 日新增 10 stars
 
 ## 新上榜
 
-1. [acme/agent-skill](https://github.com/acme/agent-skill) — 一个实用 Agent Skill  
+1. [acme/agent-skill](https://github.com/acme/agent-skill) — 一个实用 Agent Skill
    综合分 `62`；7 日新增 10 stars
 
 ## 掉榜
@@ -16,17 +16,17 @@
 
 ## 本周黑马
 
-1. [acme/agent-skill](https://github.com/acme/agent-skill) — 一个实用 Agent Skill  
+1. [acme/agent-skill](https://github.com/acme/agent-skill) — 一个实用 Agent Skill
    综合分 `62`；7 日新增 10 stars
 
 ## 连续升温
 
-1. [acme/agent-skill](https://github.com/acme/agent-skill) — 一个实用 Agent Skill  
+1. [acme/agent-skill](https://github.com/acme/agent-skill) — 一个实用 Agent Skill
    综合分 `62`；7 日新增 10 stars
 
 ## 值得立即试用
 
-1. [acme/agent-skill](https://github.com/acme/agent-skill) — 一个实用 Agent Skill  
+1. [acme/agent-skill](https://github.com/acme/agent-skill) — 一个实用 Agent Skill
    综合分 `62`；7 日新增 10 stars
 
 ## 本周重要官方更新

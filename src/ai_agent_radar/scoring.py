@@ -37,7 +37,10 @@ def score_repository(
     ]
     utility = _bounded(sum(utility_flags) * 20)
     age_days = max(0, (now - repo.created_at.astimezone(timezone.utc)).days)
-    push_days = (now - (repo.pushed_at or repo.updated_at).astimezone(timezone.utc)).days
+    push_days = max(
+        0,
+        (now - (repo.pushed_at or repo.updated_at).astimezone(timezone.utc)).days,
+    )
     freshness = _bounded(
         (55 if trend.first_seen else 20)
         + max(0, 30 - push_days * 2)

@@ -6,17 +6,17 @@
 
 ## 今日新发现
 
-1. [acme/agent-skill](https://github.com/acme/agent-skill) — 一个实用 Agent Skill  
+1. [acme/agent-skill](https://github.com/acme/agent-skill) — 一个实用 Agent Skill
    综合分 `62`；7 日新增 10 stars
 
 ## 增长最快
 
-1. [acme/agent-skill](https://github.com/acme/agent-skill) — 一个实用 Agent Skill  
+1. [acme/agent-skill](https://github.com/acme/agent-skill) — 一个实用 Agent Skill
    综合分 `62`；7 日新增 10 stars
 
 ## 最实用
 
-1. [acme/agent-skill](https://github.com/acme/agent-skill) — 一个实用 Agent Skill  
+1. [acme/agent-skill](https://github.com/acme/agent-skill) — 一个实用 Agent Skill
    综合分 `62`；7 日新增 10 stars
 
 ## 分类榜

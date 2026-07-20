@@ -158,7 +158,7 @@ def run_pipeline(
     report_path = root / "reports" / mode / filename
     snapshot_path = root / "data/snapshots" / f"{day.isoformat()}.json"
     markdown = (
-        render_daily(day, bundle, top_limit=limit)
+        render_daily(day, bundle, top_limit=limit, ranked_count=len(rows))
         if mode == "daily"
         else render_weekly(day, bundle, top_limit=limit)
     )

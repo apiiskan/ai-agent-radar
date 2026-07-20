@@ -52,6 +52,24 @@ def test_daily_matches_golden_and_contains_original_links(report_bundle) -> None
     assert "7 日新增" in markdown
 
 
+def test_daily_summary_distinguishes_displayed_items_from_total_ranked(
+    report_bundle,
+) -> None:
+    markdown = render_daily(
+        date(2026, 7, 20), report_bundle, top_limit=10, ranked_count=27
+    )
+
+    assert "共排名 27 个项目，展示前 1 个" in markdown
+
+
+def test_report_markdown_has_no_trailing_whitespace(report_bundle) -> None:
+    for markdown in (
+        render_daily(date(2026, 7, 20), report_bundle),
+        render_weekly(date(2026, 7, 20), report_bundle),
+    ):
+        assert all(line == line.rstrip() for line in markdown.splitlines())
+
+
 def test_weekly_matches_golden_and_contains_rank_movement_and_recommendations(report_bundle) -> None:
     markdown = render_weekly(date(2026, 7, 20), report_bundle)
 

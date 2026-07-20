@@ -86,6 +86,21 @@ def test_negative_trend_deltas_are_clamped_before_logarithmic_scoring(repo_facto
     assert 0 <= score.total <= 100
 
 
+def test_push_after_report_cutoff_is_clamped_to_zero_days(
+    repo_factory, trend_factory, radar_config
+) -> None:
+    cutoff = datetime(2026, 7, 20, tzinfo=timezone.utc)
+    score = score_repository(
+        repo_factory(pushed_at=cutoff + timedelta(hours=6)),
+        trend_factory(),
+        radar_config.weights,
+        cutoff,
+    )
+
+    assert "新鲜度：基础分；最近推送距今 0 天" in score.reasons
+    assert all("距今 -" not in reason for reason in score.reasons)
+
+
 def test_reasons_describe_actual_and_missing_evidence(repo_factory, trend_factory, radar_config) -> None:
     now = datetime(2026, 7, 20, tzinfo=timezone.utc)
     repo = repo_factory(
