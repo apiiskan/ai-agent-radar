@@ -122,13 +122,11 @@ def _parse_github_releases(source: FeedConfig, payload: bytes) -> list[NewsRecor
             continue
         name = release.get("name")
         tag = release.get("tag_name")
-        title = (
-            name.strip()
-            if isinstance(name, str) and name.strip()
-            else tag.strip()
-            if isinstance(tag, str) and tag.strip()
-            else "Untitled"
-        )
+        title = "Untitled"
+        for candidate in (name, tag):
+            if isinstance(candidate, str) and candidate.strip():
+                title = candidate.strip()
+                break
         body = release.get("body")
         records.append(
             NewsRecord(
