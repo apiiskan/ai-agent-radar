@@ -183,6 +183,34 @@ def test_collect_requires_explicit_results_for_every_optional_detail(
         assert collection.statuses[-1].name == "github:optional-details"
 
 
+def test_collect_rejects_malformed_or_undecodable_readme_payloads(
+    radar_config,
+) -> None:
+    fixture = Path(__file__).with_name("fixtures") / "github_search.json"
+    search_payload = json.loads(fixture.read_text(encoding="utf-8"))
+
+    for readme_payload in (
+        [],
+        {"encoding": "base64"},
+        {"encoding": "base64", "content": "%%%not-base64%%%"},
+        {"encoding": "none", "content": ""},
+    ):
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/search/repositories":
+                return httpx.Response(200, json=search_payload)
+            if request.url.path.endswith("/readme"):
+                return httpx.Response(200, json=readme_payload)
+            return httpx.Response(404)
+
+        collection = GitHubClient(
+            "token", httpx.Client(transport=httpx.MockTransport(handler))
+        ).collect(radar_config)
+
+        assert collection.complete is False
+        assert collection.repositories[0].readme_detail_valid is False
+        assert collection.statuses[-1].name == "github:optional-details"
+
+
 def test_enrich_reads_readme_release_and_root_capabilities(repo_factory) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/readme"):

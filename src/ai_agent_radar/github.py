@@ -151,12 +151,19 @@ class GitHubClient:
         release = release_result.payload
         root = root_result.payload
         content = ""
-        if isinstance(readme, dict) and readme.get("encoding") == "base64":
+        readme_detail_valid = readme_result.valid and readme is None
+        if (
+            isinstance(readme, dict)
+            and readme.get("encoding") == "base64"
+            and isinstance(readme.get("content"), str)
+        ):
             try:
-                content = base64.b64decode(readme.get("content", "")).decode(
+                encoded = "".join(readme["content"].split())
+                content = base64.b64decode(encoded, validate=True).decode(
                     "utf-8", errors="replace"
                 )
-            except (TypeError, ValueError):
+                readme_detail_valid = True
+            except (TypeError, ValueError, UnicodeError):
                 content = ""
         names: set[str] = set()
         root_detail_valid = root_result.valid and (
@@ -202,7 +209,7 @@ class GitHubClient:
                 "latest_release": latest_release,
                 "latest_release_published_at": latest_release_published_at,
                 "release_detail_valid": release_detail_valid,
-                "readme_detail_valid": readme_result.valid,
+                "readme_detail_valid": readme_detail_valid,
                 "root_detail_valid": root_detail_valid,
                 "has_skill_md": "skill.md" in names,
                 "has_mcp": any("mcp" in name for name in names),
