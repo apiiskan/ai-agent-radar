@@ -3,17 +3,29 @@
 from __future__ import annotations
 
 import json
+from typing import Annotated
 
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
 from .models import RepoRecord, ScoreBreakdown
 
+MAX_REPOSITORY_NAME_LENGTH = 200
+MAX_DESCRIPTION_LENGTH = 500
+MAX_README_LENGTH = 4000
+MAX_REASONS = 10
+MAX_REASON_LENGTH = 300
+MAX_ONE_LINE_LENGTH = 300
+MAX_AUDIENCE_LENGTH = 200
+MAX_WHY_NOW_LENGTH = 1000
+
 
 class ProjectSummary(BaseModel):
-    one_line: str
-    audience: str
-    why_now: str
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    one_line: Annotated[StrictStr, Field(min_length=1, max_length=MAX_ONE_LINE_LENGTH)]
+    audience: Annotated[StrictStr, Field(min_length=1, max_length=MAX_AUDIENCE_LENGTH)]
+    why_now: Annotated[StrictStr, Field(min_length=1, max_length=MAX_WHY_NOW_LENGTH)]
     enhanced: bool
 
 
@@ -36,10 +48,12 @@ class Summarizer:
             return fallback
 
         data = {
-            "name": repo.full_name,
-            "description": repo.description[:500],
-            "readme": repo.readme[:4000],
-            "reasons": score.reasons,
+            "name": repo.full_name[:MAX_REPOSITORY_NAME_LENGTH],
+            "description": repo.description[:MAX_DESCRIPTION_LENGTH],
+            "readme": repo.readme[:MAX_README_LENGTH],
+            "reasons": tuple(
+                reason[:MAX_REASON_LENGTH] for reason in score.reasons[:MAX_REASONS]
+            ),
         }
         messages = [
             {
@@ -70,9 +84,15 @@ class Summarizer:
 
     @staticmethod
     def _fallback(repo: RepoRecord, score: ScoreBreakdown) -> ProjectSummary:
+        one_line = repo.description.strip()[:MAX_ONE_LINE_LENGTH]
+        if not one_line:
+            one_line = f"{repo.full_name[:MAX_REPOSITORY_NAME_LENGTH]} 是一个 AI Agent 相关项目。"
+        why_now = "；".join(
+            reason[:MAX_REASON_LENGTH] for reason in score.reasons[:MAX_REASONS]
+        )[:MAX_WHY_NOW_LENGTH]
         return ProjectSummary(
-            one_line=repo.description or f"{repo.full_name} 是一个 AI Agent 相关项目。",
+            one_line=one_line,
             audience="希望试用相关 Agent 工具的开发者",
-            why_now="；".join(score.reasons),
+            why_now=why_now or "评分依据不足。",
             enhanced=False,
         )
