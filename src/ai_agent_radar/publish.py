@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import quote
+
 import httpx
 
 
@@ -19,6 +21,7 @@ class IssuePublisher:
         }
 
     def upsert(self, title: str, body: str, label: str) -> str:
+        self._ensure_label(label)
         base_url = f"https://api.github.com/repos/{self.repository}/issues"
         issue = self._find_issue(base_url, title, label)
         if issue:
@@ -37,6 +40,26 @@ class IssuePublisher:
             )
         result.raise_for_status()
         return result.json()["html_url"]
+
+    def _ensure_label(self, label: str) -> None:
+        labels_url = f"https://api.github.com/repos/{self.repository}/labels"
+        response = self.client.get(
+            f"{labels_url}/{quote(label, safe='')}",
+            headers=self.headers,
+            timeout=20,
+        )
+        if response.status_code == 404:
+            response = self.client.post(
+                labels_url,
+                headers=self.headers,
+                json={
+                    "name": label,
+                    "color": "1d76db",
+                    "description": "AI Agent Radar automated reports",
+                },
+                timeout=20,
+            )
+        response.raise_for_status()
 
     def _find_issue(self, base_url: str, title: str, label: str) -> dict | None:
         url: str | httpx.URL = base_url

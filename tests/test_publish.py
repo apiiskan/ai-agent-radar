@@ -1,14 +1,84 @@
 import json
 
 import httpx
+import pytest
 
 from ai_agent_radar.publish import IssuePublisher
 
 
-def _publisher(handler) -> IssuePublisher:
+def _raw_publisher(handler) -> IssuePublisher:
     return IssuePublisher(
         "token", "o/r", httpx.Client(transport=httpx.MockTransport(handler))
     )
+
+
+def _publisher(handler) -> IssuePublisher:
+    def label_aware_handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and "/labels/" in request.url.path:
+            return httpx.Response(200, json={"name": request.url.path.rsplit("/", 1)[-1]})
+        return handler(request)
+
+    return _raw_publisher(label_aware_handler)
+
+
+def test_upsert_reuses_existing_label_before_searching_issues() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "GET" and "/labels/" in request.url.path:
+            return httpx.Response(200, json={"name": "radar-daily"})
+        if request.method == "GET":
+            return httpx.Response(200, json=[])
+        return httpx.Response(201, json={"html_url": "https://github.com/o/r/issues/1"})
+
+    _raw_publisher(handler).upsert("Daily", "body", "radar-daily")
+
+    assert requests[0].url.path == "/repos/o/r/labels/radar-daily"
+    assert not any(request.url.path == "/repos/o/r/labels" for request in requests)
+
+
+def test_upsert_creates_missing_label_before_searching_issues() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "GET" and "/labels/" in request.url.path:
+            return httpx.Response(404, json={"message": "Not Found"})
+        if request.method == "POST" and request.url.path.endswith("/labels"):
+            return httpx.Response(201, json={"name": "radar-weekly"})
+        if request.method == "GET":
+            return httpx.Response(200, json=[])
+        return httpx.Response(201, json={"html_url": "https://github.com/o/r/issues/1"})
+
+    _raw_publisher(handler).upsert("Weekly", "body", "radar-weekly")
+
+    create = next(request for request in requests if request.url.path.endswith("/labels"))
+    assert json.loads(create.content) == {
+        "name": "radar-weekly",
+        "color": "1d76db",
+        "description": "AI Agent Radar automated reports",
+    }
+    issue_search_index = next(
+        index
+        for index, request in enumerate(requests)
+        if request.method == "GET" and request.url.path.endswith("/issues")
+    )
+    assert requests.index(create) < issue_search_index
+
+
+def test_upsert_stops_when_label_lookup_fails() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(500, json={"message": "failure"})
+
+    with pytest.raises(httpx.HTTPStatusError):
+        _raw_publisher(handler).upsert("Daily", "body", "radar-daily")
+
+    assert len(requests) == 1
+    assert requests[0].url.path == "/repos/o/r/labels/radar-daily"
 
 
 def test_upsert_does_not_match_issue_with_missing_title() -> None:
