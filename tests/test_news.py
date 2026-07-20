@@ -1,3 +1,5 @@
+import json
+
 from ai_agent_radar.config import FeedConfig
 from ai_agent_radar.news import collect_news
 from ai_agent_radar.normalize import canonicalize_url
@@ -64,6 +66,59 @@ def test_collect_news_extracts_dated_official_html_articles() -> None:
 
     assert result.items[0].canonical_url == "https://x.ai/news/grok-5"
     assert result.items[0].title == "Grok 5"
+
+
+def test_collect_news_maps_github_release_fields() -> None:
+    payload = json.dumps(
+        [
+            {
+                "tag_name": "v2.1.215",
+                "name": "Claude Code 2.1.215",
+                "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.215",
+                "published_at": "2026-07-19T20:00:00Z",
+                "body": "Release notes",
+            },
+            {
+                "tag_name": "v2.1.214",
+                "name": "",
+                "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.214",
+                "published_at": "2026-07-18T20:00:00Z",
+                "body": None,
+            },
+        ]
+    ).encode()
+    source = FeedConfig(
+        name="Anthropic Releases",
+        url="https://api.github.com/repos/anthropics/claude-code/releases?per_page=30",
+        tier="official",
+        kind="github_releases",
+    )
+
+    result = collect_news([source], lambda url: payload)
+
+    assert [(item.title, item.summary) for item in result.items] == [
+        ("v2.1.214", ""),
+        ("Claude Code 2.1.215", "Release notes"),
+    ]
+    assert result.items[1].canonical_url.endswith("/releases/tag/v2.1.215")
+    assert result.items[1].published_at.isoformat() == "2026-07-19T20:00:00+00:00"
+    assert result.statuses[0].ok is True
+    assert result.statuses[0].item_count == 2
+
+
+def test_collect_news_degrades_invalid_github_release_payload_to_source_failure() -> None:
+    source = FeedConfig(
+        name="xAI Releases",
+        url="https://api.github.com/repos/xai-org/xai-sdk-python/releases",
+        tier="official",
+        kind="github_releases",
+    )
+
+    result = collect_news([source], lambda url: b'{"message":"rate limited"}')
+
+    assert result.items == ()
+    assert result.statuses[0].ok is False
+    assert result.statuses[0].error == "ValueError"
 
 
 def test_collect_news_keeps_only_http_links_on_configured_html_domain() -> None:

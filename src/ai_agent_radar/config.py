@@ -14,7 +14,7 @@ class FeedConfig(BaseModel):
     name: str
     url: str
     tier: Literal["official", "trusted", "custom"]
-    kind: Literal["rss", "html"] = "rss"
+    kind: Literal["rss", "html", "github_releases"] = "rss"
 
 
 class WeightConfig(BaseModel):

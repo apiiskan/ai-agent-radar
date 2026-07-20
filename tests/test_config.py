@@ -71,3 +71,18 @@ def test_load_config_normalizes_yaml_and_timezone_failures(
 def test_load_config_normalizes_missing_file(tmp_path: Path) -> None:
     with pytest.raises(ConfigurationError, match="unable to read radar configuration"):
         load_config(tmp_path / "missing.yaml")
+
+
+def test_repository_config_uses_structured_official_release_sources() -> None:
+    config = load_config(Path("config/radar.yaml"))
+    releases = {feed.name: feed for feed in config.feeds if feed.kind == "github_releases"}
+
+    assert releases["Anthropic Releases"].url.startswith(
+        "https://api.github.com/repos/anthropics/claude-code/releases"
+    )
+    assert releases["xAI Releases"].url.startswith(
+        "https://api.github.com/repos/xai-org/xai-sdk-python/releases"
+    )
+    assert releases["Kimi Releases"].url.startswith(
+        "https://api.github.com/repos/MoonshotAI/kimi-cli/releases"
+    )

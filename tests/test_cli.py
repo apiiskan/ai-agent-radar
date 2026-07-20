@@ -18,6 +18,20 @@ def test_cli_defaults_to_dry_run() -> None:
     assert args.mode == "daily"
 
 
+def test_news_headers_authenticate_only_github_api_requests() -> None:
+    authenticated = cli._news_headers(
+        "https://api.github.com/repos/anthropics/claude-code/releases", "token-value"
+    )
+
+    assert authenticated["Accept"] == "application/vnd.github+json"
+    assert authenticated["Authorization"] == "Bearer token-value"
+    assert authenticated["X-GitHub-Api-Version"] == "2022-11-28"
+    assert "Authorization" not in cli._news_headers(
+        "https://api.github.com/repos/xai-org/xai-sdk-python/releases", None
+    )
+    assert cli._news_headers("https://api.github.com.evil.example/releases", "token-value") == {}
+
+
 @pytest.mark.parametrize(
     ("arguments", "environment", "message"),
     [
@@ -88,6 +102,47 @@ def test_cli_reports_result_and_uses_source_health_for_exit_code(
     )
     assert calls[0][5] is False
     assert calls[0][4].publish_issue is None
+
+
+def test_empty_model_variables_fall_back_to_defaults(
+    tmp_path, config_path, monkeypatch, capsys
+) -> None:
+    captured: dict[str, str] = {}
+
+    class CapturingSummarizer:
+        def __init__(self, api_key, base_url, model, client) -> None:
+            captured.update(base_url=base_url, model=model)
+
+        def summarize(self, repo, score):
+            raise AssertionError("pipeline is stubbed")
+
+    result = RunResult(
+        report_path="report.md",
+        snapshot_path="snapshot.json",
+        issue_url=None,
+        candidates=0,
+        filtered=0,
+        ranked=0,
+        source_statuses=(SourceStatus(name="github:test", ok=True),),
+    )
+    monkeypatch.setattr(cli, "Summarizer", CapturingSummarizer)
+    monkeypatch.setattr(cli, "run_pipeline", lambda *args, **kwargs: result)
+
+    exit_code = cli.main(
+        ["daily", "--root", str(tmp_path), "--config", str(config_path)],
+        {
+            "GITHUB_TOKEN": "token-value",
+            "MODEL_BASE_URL": "",
+            "MODEL_NAME": "",
+        },
+    )
+
+    assert exit_code == 0
+    assert captured == {
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-5-mini",
+    }
+    assert "token-value" not in capsys.readouterr().out
 
 
 def test_cli_returns_one_for_pipeline_failure_without_echoing_exception_secret(

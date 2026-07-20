@@ -15,7 +15,7 @@ GITHUB_TOKEN=your_read_token .venv/bin/ai-agent-radar weekly --date 2026-07-20
 
 ## 数据源与配置
 
-编辑 `config/radar.yaml` 可以增删查询组、RSS/HTML 官方来源、排除项、榜单长度和评分权重。`feeds[].kind` 只能是 `rss` 或 `html`；HTML 来源只收录同时具有链接和机器可读发布时间的 `article`。
+编辑 `config/radar.yaml` 可以增删查询组、RSS/HTML/GitHub Releases 官方来源、排除项、榜单长度和评分权重。`feeds[].kind` 可以是 `rss`、`html` 或 `github_releases`；HTML 来源只收录同时具有链接和机器可读发布时间的 `article`，GitHub Releases 来源读取官方仓库的结构化发布数据。
 
 ## GitHub 配置
 

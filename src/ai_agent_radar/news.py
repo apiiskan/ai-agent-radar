@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -27,7 +28,12 @@ def collect_news(feeds: list[FeedConfig], fetch: Callable[[str], bytes]) -> News
     for source in feeds:
         try:
             payload = fetch(source.url)
-            records = _parse_rss(source, payload) if source.kind == "rss" else _parse_html(source, payload)
+            if source.kind == "rss":
+                records = _parse_rss(source, payload)
+            elif source.kind == "html":
+                records = _parse_html(source, payload)
+            else:
+                records = _parse_github_releases(source, payload)
             for record in records:
                 existing = by_url.get(record.canonical_url)
                 if existing is None or (record.tier == "official" and existing.tier != "official"):
@@ -88,6 +94,50 @@ def _parse_rss(source: FeedConfig, payload: bytes) -> list[NewsRecord]:
                 tier=source.tier,
                 published_at=published,
                 summary=summary if isinstance(summary, str) else "",
+            )
+        )
+    return records
+
+
+def _parse_github_releases(source: FeedConfig, payload: bytes) -> list[NewsRecord]:
+    releases = json.loads(payload)
+    if not isinstance(releases, list):
+        raise ValueError("GitHub releases response must be a JSON array")
+
+    records: list[NewsRecord] = []
+    for release in releases:
+        if not isinstance(release, dict):
+            continue
+        url = release.get("html_url")
+        published_at = release.get("published_at")
+        if (
+            not isinstance(url, str)
+            or not _is_absolute_http_url(url)
+            or not isinstance(published_at, str)
+        ):
+            continue
+        try:
+            published = _parse_datetime(published_at)
+        except ValueError:
+            continue
+        name = release.get("name")
+        tag = release.get("tag_name")
+        title = (
+            name.strip()
+            if isinstance(name, str) and name.strip()
+            else tag.strip()
+            if isinstance(tag, str) and tag.strip()
+            else "Untitled"
+        )
+        body = release.get("body")
+        records.append(
+            NewsRecord(
+                canonical_url=canonicalize_url(url),
+                title=title,
+                source=source.name,
+                tier=source.tier,
+                published_at=published,
+                summary=body[:1000] if isinstance(body, str) else "",
             )
         )
     return records

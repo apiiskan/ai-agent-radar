@@ -7,9 +7,9 @@ queries:
   general: ["agent skills SKILL.md", "MCP agent tools", "multi-agent framework", "computer-use agent"]
 feeds:
   - {name: OpenAI News, url: "https://openai.com/news/rss.xml", tier: official, kind: rss}
-  - {name: Anthropic News, url: "https://www.anthropic.com/news/rss.xml", tier: official, kind: rss}
-  - {name: xAI News, url: "https://x.ai/news", tier: official, kind: html}
-  - {name: Moonshot AI, url: "https://www.moonshot.cn/news", tier: official, kind: html}
+  - {name: Anthropic Releases, url: "https://api.github.com/repos/anthropics/claude-code/releases?per_page=30", tier: official, kind: github_releases}
+  - {name: xAI Releases, url: "https://api.github.com/repos/xai-org/xai-sdk-python/releases?per_page=30", tier: official, kind: github_releases}
+  - {name: Kimi Releases, url: "https://api.github.com/repos/MoonshotAI/kimi-cli/releases?per_page=30", tier: official, kind: github_releases}
 weights: {heat: 45, utility: 25, freshness: 20, relevance: 10}
 limits: {search_per_query: 30, daily_top: 10, weekly_top: 20}
 exclusions: {repositories: [], keywords: ["awesome list mirror", "SEO"]}

@@ -6,6 +6,7 @@ import os
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -16,6 +17,9 @@ from .news import collect_news
 from .pipeline import PipelineDependencies, run_pipeline
 from .publish import IssuePublisher
 from .summarize import Summarizer
+
+DEFAULT_MODEL_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_MODEL_NAME = "gpt-5-mini"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,6 +34,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _print_error(message: str) -> None:
     print(json.dumps({"ok": False, "error": message}, ensure_ascii=False))
+
+
+def _news_headers(url: str, token: str | None) -> dict[str, str]:
+    if urlsplit(url).hostname != "api.github.com":
+        return {}
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
 
 
 def main(
@@ -61,8 +77,8 @@ def main(
             github = GitHubClient(token, client)
             summarizer = Summarizer(
                 api_key=environment.get("MODEL_API_KEY"),
-                base_url=environment.get("MODEL_BASE_URL", "https://api.openai.com/v1"),
-                model=environment.get("MODEL_NAME", "gpt-5-mini"),
+                base_url=environment.get("MODEL_BASE_URL") or DEFAULT_MODEL_BASE_URL,
+                model=environment.get("MODEL_NAME") or DEFAULT_MODEL_NAME,
                 client=client,
             )
             issue_publisher = (
@@ -70,7 +86,11 @@ def main(
             )
 
             def fetch(url: str) -> bytes:
-                response = client.get(url, timeout=20)
+                response = client.get(
+                    url,
+                    headers=_news_headers(url, token),
+                    timeout=20,
+                )
                 response.raise_for_status()
                 if len(response.content) > 5_000_000:
                     raise ValueError("news source response exceeds 5 MB")
