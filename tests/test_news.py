@@ -121,6 +121,42 @@ def test_collect_news_degrades_invalid_github_release_payload_to_source_failure(
     assert result.statuses[0].error == "ValueError"
 
 
+def test_collect_news_treats_nonempty_release_array_without_valid_records_as_failure() -> None:
+    source = FeedConfig(
+        name="Kimi Releases",
+        url="https://api.github.com/repos/MoonshotAI/kimi-cli/releases",
+        tier="official",
+        kind="github_releases",
+    )
+    payload = json.dumps(
+        [
+            {"tag_name": "missing URL and date"},
+            "not an object",
+        ]
+    ).encode()
+
+    result = collect_news([source], lambda url: payload)
+
+    assert result.items == ()
+    assert result.statuses[0].ok is False
+    assert result.statuses[0].error == "ValueError"
+
+
+def test_collect_news_allows_empty_github_release_array() -> None:
+    source = FeedConfig(
+        name="Kimi Releases",
+        url="https://api.github.com/repos/MoonshotAI/kimi-cli/releases",
+        tier="official",
+        kind="github_releases",
+    )
+
+    result = collect_news([source], lambda url: b"[]")
+
+    assert result.items == ()
+    assert result.statuses[0].ok is True
+    assert result.statuses[0].item_count == 0
+
+
 def test_collect_news_keeps_only_http_links_on_configured_html_domain() -> None:
     html = b"""<main>
     <article><a href='https://x.ai/news/valid'>Valid</a><time datetime='2026-07-19T08:00:00Z'>July 19</time></article>

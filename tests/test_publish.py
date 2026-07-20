@@ -81,6 +81,50 @@ def test_upsert_stops_when_label_lookup_fails() -> None:
     assert requests[0].url.path == "/repos/o/r/labels/radar-daily"
 
 
+def test_upsert_recovers_when_concurrent_label_creation_returns_422() -> None:
+    requests: list[httpx.Request] = []
+    label_lookups = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal label_lookups
+        requests.append(request)
+        if request.method == "GET" and "/labels/" in request.url.path:
+            label_lookups += 1
+            return httpx.Response(
+                404 if label_lookups == 1 else 200,
+                json={"message": "Not Found"} if label_lookups == 1 else {"name": "radar-daily"},
+            )
+        if request.method == "POST" and request.url.path.endswith("/labels"):
+            return httpx.Response(422, json={"message": "Validation Failed"})
+        if request.method == "GET":
+            return httpx.Response(200, json=[])
+        return httpx.Response(201, json={"html_url": "https://github.com/o/r/issues/1"})
+
+    url = _raw_publisher(handler).upsert("Daily", "body", "radar-daily")
+
+    assert url.endswith("/1")
+    assert label_lookups == 2
+    assert any(request.url.path.endswith("/issues") for request in requests)
+
+
+def test_upsert_fails_when_label_is_still_missing_after_422_race() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "GET" and "/labels/" in request.url.path:
+            return httpx.Response(404, json={"message": "Not Found"})
+        if request.method == "POST" and request.url.path.endswith("/labels"):
+            return httpx.Response(422, json={"message": "Validation Failed"})
+        raise AssertionError("issue search must not run without the label")
+
+    with pytest.raises(httpx.HTTPStatusError):
+        _raw_publisher(handler).upsert("Daily", "body", "radar-daily")
+
+    assert [request.method for request in requests] == ["GET", "POST", "GET"]
+    assert all("/issues" not in request.url.path for request in requests)
+
+
 def test_upsert_does_not_match_issue_with_missing_title() -> None:
     requests: list[httpx.Request] = []
 

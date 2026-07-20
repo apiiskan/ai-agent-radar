@@ -37,7 +37,16 @@ def _print_error(message: str) -> None:
 
 
 def _news_headers(url: str, token: str | None) -> dict[str, str]:
-    if urlsplit(url).hostname != "api.github.com":
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return {}
+    if (
+        parts.scheme.casefold() != "https"
+        or parts.hostname != "api.github.com"
+        or port not in {None, 443}
+    ):
         return {}
     headers = {
         "Accept": "application/vnd.github+json",

@@ -40,3 +40,12 @@ def test_daily_and_weekly_workflows_cover_install_publish_and_scoped_commit() ->
         commit_script = next(run for run in runs if "git commit" in run)
         assert "git add data reports" in commit_script
         assert "git add ." not in commit_script
+
+
+def test_daily_and_weekly_use_distinct_mode_specific_concurrency_groups() -> None:
+    daily_group = load_workflow("daily")["concurrency"]["group"]
+    weekly_group = load_workflow("weekly")["concurrency"]["group"]
+
+    assert daily_group == "ai-agent-radar-daily"
+    assert weekly_group == "ai-agent-radar-weekly"
+    assert daily_group != weekly_group

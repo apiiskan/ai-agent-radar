@@ -138,6 +138,8 @@ def _parse_github_releases(source: FeedConfig, payload: bytes) -> list[NewsRecor
                 summary=body[:1000] if isinstance(body, str) else "",
             )
         )
+    if releases and not records:
+        raise ValueError("GitHub releases response contained no valid releases")
     return records
 
 

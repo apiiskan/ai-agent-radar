@@ -43,8 +43,9 @@ class IssuePublisher:
 
     def _ensure_label(self, label: str) -> None:
         labels_url = f"https://api.github.com/repos/{self.repository}/labels"
+        label_url = f"{labels_url}/{quote(label, safe='')}"
         response = self.client.get(
-            f"{labels_url}/{quote(label, safe='')}",
+            label_url,
             headers=self.headers,
             timeout=20,
         )
@@ -59,6 +60,12 @@ class IssuePublisher:
                 },
                 timeout=20,
             )
+            if response.status_code == 422:
+                response = self.client.get(
+                    label_url,
+                    headers=self.headers,
+                    timeout=20,
+                )
         response.raise_for_status()
 
     def _find_issue(self, base_url: str, title: str, label: str) -> dict | None:

@@ -18,18 +18,43 @@ def test_cli_defaults_to_dry_run() -> None:
     assert args.mode == "daily"
 
 
-def test_news_headers_authenticate_only_github_api_requests() -> None:
-    authenticated = cli._news_headers(
-        "https://api.github.com/repos/anthropics/claude-code/releases", "token-value"
-    )
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://api.github.com/repos/anthropics/claude-code/releases",
+        "https://API.GITHUB.COM:443/repos/xai-org/xai-sdk-python/releases",
+    ],
+)
+def test_news_headers_authenticate_only_safe_github_api_origins(url) -> None:
+    authenticated = cli._news_headers(url, "token-value")
 
     assert authenticated["Accept"] == "application/vnd.github+json"
     assert authenticated["Authorization"] == "Bearer token-value"
     assert authenticated["X-GitHub-Api-Version"] == "2022-11-28"
-    assert "Authorization" not in cli._news_headers(
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://api.github.com/repos/anthropics/claude-code/releases",
+        "https://api.github.com:8443/repos/anthropics/claude-code/releases",
+        "https://api.github.com.evil.example/releases",
+        "https://api.github.com:not-a-port/releases",
+        "https://api.github.com:99999/releases",
+        "https://[api.github.com/releases",
+    ],
+)
+def test_news_headers_reject_unsafe_or_malformed_github_api_origins(url) -> None:
+    assert cli._news_headers(url, "token-value") == {}
+
+
+def test_news_headers_omit_authorization_without_token() -> None:
+    headers = cli._news_headers(
         "https://api.github.com/repos/xai-org/xai-sdk-python/releases", None
     )
-    assert cli._news_headers("https://api.github.com.evil.example/releases", "token-value") == {}
+
+    assert headers["Accept"] == "application/vnd.github+json"
+    assert "Authorization" not in headers
 
 
 @pytest.mark.parametrize(
