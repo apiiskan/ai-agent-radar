@@ -33,6 +33,7 @@ class GitHubClient:
             "X-GitHub-Api-Version": "2022-11-28",
         }
         self.rate_remaining: int | None = None
+        self.limited = False
 
     def search(self, query: str, category: str, per_page: int) -> list[RepoRecord]:
         response = self.client.get(
@@ -43,7 +44,13 @@ class GitHubClient:
         )
         self._capture_rate(response)
         response.raise_for_status()
-        return [self._normalize(item, category) for item in response.json().get("items", [])]
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError("GitHub search response must be a JSON object")
+        items = payload.get("items", [])
+        if not isinstance(items, list):
+            raise ValueError("GitHub search response items must be a list")
+        return [self._normalize(item, category) for item in items]
 
     def safe_search(
         self, query: str, category: str, per_page: int
@@ -57,13 +64,15 @@ class GitHubClient:
                 last_success_at=self.now(),
             )
         except httpx.HTTPStatusError as exc:
-            limited = (
-                exc.response.status_code == 403
-                and exc.response.headers.get("x-ratelimit-remaining") == "0"
+            message = (
+                "GitHub rate limit exhausted"
+                if self.limited
+                else f"GitHub HTTP {exc.response.status_code}"
             )
-            message = "GitHub rate limit exhausted" if limited else f"GitHub HTTP {exc.response.status_code}"
             return [], SourceStatus(name=f"github:{category}:{query}", ok=False, error=message)
         except httpx.HTTPError as exc:
+            return [], SourceStatus(name=f"github:{category}:{query}", ok=False, error=type(exc).__name__)
+        except (KeyError, TypeError, ValueError) as exc:
             return [], SourceStatus(name=f"github:{category}:{query}", ok=False, error=type(exc).__name__)
 
     def collect(self, config: RadarConfig) -> GitHubCollection:
@@ -81,7 +90,7 @@ class GitHubClient:
                         update={"matched_categories": tuple(sorted(categories))}
                     )
                 statuses.append(status)
-                if self.rate_remaining == 0:
+                if self.limited:
                     return GitHubCollection(tuple(repos.values()), tuple(statuses), self.rate_remaining)
         enriched = [self.enrich(repo) for repo in repos.values()]
         return GitHubCollection(tuple(enriched), tuple(statuses), self.rate_remaining)
@@ -112,7 +121,7 @@ class GitHubClient:
         )
 
     def _optional_json(self, url: str) -> dict | list | None:
-        if self.rate_remaining is not None and self.rate_remaining <= 10:
+        if self.limited or (self.rate_remaining is not None and self.rate_remaining <= 10):
             return None
         try:
             response = self.client.get(url, headers=self.headers, timeout=20)
@@ -127,10 +136,17 @@ class GitHubClient:
     def _capture_rate(self, response: httpx.Response) -> None:
         value = response.headers.get("x-ratelimit-remaining")
         self.rate_remaining = int(value) if value and value.isdigit() else self.rate_remaining
+        self.limited = self.limited or response.status_code == 429 or (
+            response.status_code == 403 and bool(response.headers.get("retry-after"))
+        ) or self.rate_remaining == 0
 
     @staticmethod
-    def _normalize(item: dict, category: str) -> RepoRecord:
-        license_data = item.get("license") or {}
+    def _normalize(item: object, category: str) -> RepoRecord:
+        if not isinstance(item, dict):
+            raise ValueError("GitHub search item must be a JSON object")
+        license_data = item.get("license")
+        if not isinstance(license_data, dict):
+            license_data = {}
         return RepoRecord(
             repository_id=item["id"],
             full_name=item["full_name"],
