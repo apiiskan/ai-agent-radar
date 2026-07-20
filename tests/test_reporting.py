@@ -143,6 +143,36 @@ def test_weekly_does_not_fabricate_transition_lists_without_history(report_bundl
     assert "old/project" not in markdown
 
 
+def test_weekly_growth_and_category_fallbacks_report_only_comparable_ranked_items(
+    report_bundle, repo_factory, score_factory
+) -> None:
+    outside_item = (
+        repo_factory(repository_id=2, full_name="acme/outside"),
+        score_factory(),
+        ProjectSummary(
+            one_line="分类榜外项目",
+            audience="开发者",
+            why_now="待观察",
+            enhanced=False,
+        ),
+    )
+    analysis = WeeklyChartAnalysis(
+        growth_history_sufficient=False,
+        growth_comparable_count=1,
+        growth_chart_count=2,
+    )
+    bundle = replace(
+        report_bundle,
+        categories={"outside": (outside_item,)},
+        weekly_analysis=analysis,
+    )
+
+    markdown = render_weekly(date(2026, 7, 20), bundle)
+
+    assert "当前榜单仅 1/2 个项目具备可比基线" in markdown
+    assert "份额：0.0%" in markdown
+
+
 def test_weekly_official_updates_exclude_trusted_and_custom_news(report_bundle) -> None:
     trusted = NewsRecord(
         canonical_url="https://trusted.example/news",

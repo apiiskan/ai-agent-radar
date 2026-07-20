@@ -119,6 +119,9 @@ class GitHubClient:
             )
             for repo in enriched
         )
+        quality_evidence_complete = all(
+            repo.readme_detail_valid or repo.root_detail_valid for repo in enriched
+        )
         if optional_detail_failures:
             statuses.append(
                 SourceStatus(
@@ -134,7 +137,9 @@ class GitHubClient:
             tuple(enriched),
             tuple(statuses),
             self.rate_remaining,
-            complete=queries_succeeded == queries_total,
+            complete=(
+                queries_succeeded == queries_total and quality_evidence_complete
+            ),
             queries_total=queries_total,
             queries_succeeded=queries_succeeded,
         )

@@ -104,6 +104,46 @@ def test_weekly_chart_compares_top_membership_and_populates_rank_change(
     assert analysis.category_share_changes == {"codex": -50.0, "general": 50.0}
 
 
+def test_weekly_chart_uses_the_same_star_tiebreak_as_formal_ranking(
+    snapshot_factory,
+) -> None:
+    history = [
+        snapshot_factory(
+            report_date=date(2026, 7, 19),
+            repository_id=1,
+            full_name="zeta/high-star",
+            stars=100,
+            total_score=50,
+        ),
+        snapshot_factory(
+            report_date=date(2026, 7, 19),
+            repository_id=2,
+            full_name="alpha/low-star",
+            stars=10,
+            total_score=50,
+        ),
+    ]
+    current = [
+        snapshot_factory(
+            repository_id=1,
+            full_name="zeta/high-star",
+            stars=100,
+            total_score=50,
+        ),
+        snapshot_factory(
+            repository_id=2,
+            full_name="alpha/low-star",
+            stars=110,
+            total_score=50,
+        ),
+    ]
+
+    analysis = analyze_weekly_charts(current, history, top_limit=1)
+
+    assert analysis.new_ids == (2,)
+    assert tuple(item.repository_id for item in analysis.dropped) == (1,)
+
+
 def test_weekly_warming_requires_three_repeated_positive_intervals_and_excludes_flat(
     snapshot_factory,
 ) -> None:
@@ -200,6 +240,40 @@ def test_weekly_dark_horse_requires_new_entry_absolute_and_relative_growth(
     assert analysis.dark_horse_ids == (2,)
     assert analysis.growth_history_sufficient is True
     assert analysis.stars_growth_total == 30
+
+
+def test_weekly_growth_summary_requires_a_baseline_for_every_chart_item(
+    snapshot_factory,
+) -> None:
+    history = [
+        snapshot_factory(
+            report_date=date(2026, 7, 13),
+            repository_id=1,
+            full_name="acme/comparable",
+            stars=10,
+            total_score=50,
+        )
+    ]
+    current = [
+        snapshot_factory(
+            repository_id=1,
+            full_name="acme/comparable",
+            stars=20,
+            total_score=90,
+        ),
+        snapshot_factory(
+            repository_id=2,
+            full_name="acme/new",
+            stars=30,
+            total_score=80,
+        ),
+    ]
+
+    analysis = analyze_weekly_charts(current, history, top_limit=2)
+
+    assert analysis.growth_history_sufficient is False
+    assert analysis.growth_comparable_count == 1
+    assert analysis.growth_chart_count == 2
 
 
 def test_weekly_analysis_marks_first_snapshot_as_insufficient(snapshot_factory) -> None:

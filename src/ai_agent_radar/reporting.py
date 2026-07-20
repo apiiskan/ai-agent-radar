@@ -171,7 +171,18 @@ def render_weekly(day: date, bundle: ReportBundle, top_limit: int = 20) -> str:
             ]
         )
     else:
-        lines.extend(["- 历史数据不足，尚不能形成可信的 7 日 Star 增长趋势。", ""])
+        coverage = (
+            f"（当前榜单仅 {analysis.growth_comparable_count}/"
+            f"{analysis.growth_chart_count} 个项目具备可比基线）"
+            if analysis.growth_chart_count
+            else ""
+        )
+        lines.extend(
+            [
+                f"- 历史数据不足，尚不能形成可信的 7 日 Star 增长趋势{coverage}。",
+                "",
+            ]
+        )
 
     lines.extend(_item_section("值得立即试用", bundle.useful, top_limit))
 
@@ -284,8 +295,11 @@ def _rank_change_text(change: int | None) -> str:
 def _category_share_from_bundle(bundle: ReportBundle, category: str) -> float:
     if not bundle.ranked:
         return 0.0
-    repository_ids = {item[0].repository_id for item in bundle.categories.get(category, ())}
-    return round(len(repository_ids) * 100 / len(bundle.ranked), 1)
+    ranked_ids = {item[0].repository_id for item in bundle.ranked}
+    category_ids = {
+        item[0].repository_id for item in bundle.categories.get(category, ())
+    }
+    return round(len(category_ids & ranked_ids) * 100 / len(ranked_ids), 1)
 
 
 def _reasons_text(reasons: tuple[str, ...]) -> str:

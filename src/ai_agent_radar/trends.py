@@ -18,6 +18,8 @@ class WeeklyChartAnalysis:
     category_current_shares: Mapping[str, float] = field(default_factory=dict)
     category_share_changes: Mapping[str, float] = field(default_factory=dict)
     growth_history_sufficient: bool = False
+    growth_comparable_count: int = 0
+    growth_chart_count: int = 0
     stars_growth_total: int = 0
     stars_growth_positive: int = 0
     stars_growth_flat: int = 0
@@ -143,7 +145,7 @@ def analyze_weekly_charts(
             old = baseline.get(item.repository_id)
             if old is not None:
                 growth_by_id[item.repository_id] = (old.stars, max(0, item.stars - old.stars))
-        growth_sufficient = bool(growth_by_id)
+        growth_sufficient = len(growth_by_id) == len(current_chart)
 
     dark_horse_ids = tuple(
         repository_id
@@ -168,6 +170,8 @@ def analyze_weekly_charts(
         category_current_shares=current_shares,
         category_share_changes=share_changes,
         growth_history_sufficient=growth_sufficient,
+        growth_comparable_count=len(growth_by_id),
+        growth_chart_count=len(current_chart),
         stars_growth_total=sum(growth_values),
         stars_growth_positive=sum(value > 0 for value in growth_values),
         stars_growth_flat=sum(value == 0 for value in growth_values),
@@ -177,7 +181,12 @@ def analyze_weekly_charts(
 def _ranked(snapshots: list[RepoSnapshot], limit: int) -> list[RepoSnapshot]:
     return sorted(
         snapshots,
-        key=lambda item: (-item.total_score, item.full_name.casefold(), item.repository_id),
+        key=lambda item: (
+            -item.total_score,
+            -item.stars,
+            item.full_name.casefold(),
+            item.repository_id,
+        ),
     )[:limit]
 
 
