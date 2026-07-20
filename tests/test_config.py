@@ -86,3 +86,13 @@ def test_repository_config_uses_structured_official_release_sources() -> None:
     assert releases["Kimi Releases"].url.startswith(
         "https://api.github.com/repos/MoonshotAI/kimi-cli/releases"
     )
+
+
+def test_repository_config_exposes_quality_evidence_policy() -> None:
+    config = load_config(Path("config/radar.yaml"))
+
+    assert config.quality.recent_release_days == 90
+    assert config.quality.fork_min_ahead_commits == 3
+    assert "openai" in config.quality.official_organizations
+    assert "mcp" in config.quality.trusted_topics
+    assert config.quality.allow_official_relevance_exception is True

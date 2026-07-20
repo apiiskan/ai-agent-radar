@@ -8,6 +8,7 @@ import ai_agent_radar.reporting as reporting
 from ai_agent_radar.models import NewsRecord, SourceStatus
 from ai_agent_radar.reporting import ReportBundle, render_daily, render_weekly, write_report_atomic
 from ai_agent_radar.summarize import ProjectSummary
+from ai_agent_radar.trends import WeeklyChartAnalysis
 
 
 @pytest.fixture
@@ -62,6 +63,15 @@ def test_daily_summary_distinguishes_displayed_items_from_total_ranked(
     assert "共排名 27 个项目，展示前 1 个" in markdown
 
 
+def test_daily_explicitly_marks_incomplete_github_discovery(report_bundle) -> None:
+    markdown = render_daily(
+        date(2026, 7, 20), replace(report_bundle, discovery_complete=False)
+    )
+
+    assert "GitHub 发现不完整" in markdown
+    assert "不应据此判断项目消失或掉榜" in markdown
+
+
 def test_report_markdown_has_no_trailing_whitespace(report_bundle) -> None:
     for markdown in (
         render_daily(date(2026, 7, 20), report_bundle),
@@ -89,6 +99,48 @@ def test_weekly_uses_custom_top_limit_in_heading_and_content(report_bundle) -> N
 
     assert "## 综合热度 Top 5" in markdown
     assert "## 综合热度 Top 20" not in markdown
+
+
+def test_weekly_renders_rank_category_share_and_growth_evidence(report_bundle) -> None:
+    analysis = WeeklyChartAnalysis(
+        history_sufficient=True,
+        prior_chart_date=date(2026, 7, 13),
+        new_ids=(1,),
+        dropped=(),
+        rank_changes={1: 2},
+        warming_history_sufficient=True,
+        continuous_warming_ids=(1,),
+        dark_horse_ids=(1,),
+        category_current_shares={"general": 50.0},
+        category_share_changes={"general": 25.0},
+        growth_history_sufficient=True,
+        stars_growth_total=30,
+        stars_growth_positive=1,
+        stars_growth_flat=0,
+    )
+    bundle = replace(report_bundle, dropped=(), weekly_analysis=analysis)
+
+    markdown = render_weekly(date(2026, 7, 20), bundle)
+
+    assert "较上期上升 2 位" in markdown
+    assert "## 分类榜与份额变化" in markdown
+    assert "general：50.0%（较上期 +25.0 个百分点）" in markdown
+    assert "## Star 增长趋势" in markdown
+    assert "Top 20 合计新增 30 stars" in markdown
+
+
+def test_weekly_does_not_fabricate_transition_lists_without_history(report_bundle) -> None:
+    bundle = replace(
+        report_bundle,
+        weekly_analysis=WeeklyChartAnalysis.insufficient("仅有当前日期快照"),
+    )
+
+    markdown = render_weekly(date(2026, 7, 20), bundle)
+
+    for heading in ("新上榜", "掉榜", "本周黑马", "连续升温", "Star 增长趋势"):
+        section = markdown.split(f"## {heading}", 1)[1].split("## ", 1)[0]
+        assert "历史数据不足" in section
+    assert "old/project" not in markdown
 
 
 def test_weekly_official_updates_exclude_trusted_and_custom_news(report_bundle) -> None:

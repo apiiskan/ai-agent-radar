@@ -35,6 +35,15 @@ class ExclusionConfig(BaseModel):
     keywords: list[str] = Field(default_factory=list)
 
 
+class QualityPolicyConfig(BaseModel):
+    recent_release_days: int = Field(default=90, ge=1, le=3650)
+    fork_min_ahead_commits: int = Field(default=3, ge=1, le=10_000)
+    official_organizations: list[str] = Field(default_factory=list)
+    trusted_topics: list[str] = Field(default_factory=list)
+    allow_official_relevance_exception: bool = True
+    keyword_stuffing_ratio: float = Field(default=0.45, gt=0, le=1)
+
+
 class RadarConfig(BaseModel):
     timezone: str
     queries: dict[str, list[str]]
@@ -42,6 +51,7 @@ class RadarConfig(BaseModel):
     weights: WeightConfig
     limits: LimitConfig
     exclusions: ExclusionConfig
+    quality: QualityPolicyConfig = Field(default_factory=QualityPolicyConfig)
 
     @model_validator(mode="after")
     def validate_invariants(self) -> "RadarConfig":

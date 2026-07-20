@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from collections.abc import Mapping, Sequence
-from datetime import date, datetime
+from collections.abc import Callable, Mapping, Sequence
+from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
@@ -24,12 +24,27 @@ DEFAULT_MODEL_NAME = "gpt-5-mini"
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ai-agent-radar")
-    parser.add_argument("mode", choices=("daily", "weekly"))
+    commands = parser.add_subparsers(dest="command", required=True)
+    for mode in ("daily", "weekly"):
+        command = commands.add_parser(mode)
+        _add_common_arguments(command)
+        command.add_argument(
+            "--publish",
+            action="store_true",
+            help="publish an already-generated report (legacy alias)",
+        )
+        command.set_defaults(mode=mode)
+    publish = commands.add_parser("publish")
+    publish.add_argument("mode", choices=("daily", "weekly"))
+    _add_common_arguments(publish)
+    publish.set_defaults(publish=True)
+    return parser
+
+
+def _add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--date", type=date.fromisoformat)
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--config", type=Path, default=Path("config/radar.yaml"))
-    parser.add_argument("--publish", action="store_true", help="create or update the GitHub Issue")
-    return parser
 
 
 def _print_error(message: str) -> None:
@@ -60,6 +75,7 @@ def _news_headers(url: str, token: str | None) -> dict[str, str]:
 def main(
     argv: Sequence[str] | None = None,
     environ: Mapping[str, str] | None = None,
+    now: Callable[[], datetime] | None = None,
 ) -> int:
     args = build_parser().parse_args(argv)
     environment = os.environ if environ is None else environ
@@ -79,10 +95,31 @@ def main(
     except ConfigurationError as exc:
         _print_error(str(exc))
         return 2
-    day = args.date or datetime.now(ZoneInfo(config.timezone)).date()
+    zone = ZoneInfo(config.timezone)
+    current_time = now() if now is not None else datetime.now(timezone.utc)
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=timezone.utc)
+    current_day = current_time.astimezone(zone).date()
+    day = args.date or current_day
+    publishing_existing = args.command == "publish" or args.publish
+    if not publishing_existing and day != current_day:
+        _print_error(
+            f"live collection date must equal current date in {config.timezone}: {current_day}"
+        )
+        return 2
 
     try:
         with httpx.Client(follow_redirects=True) as client:
+            if publishing_existing:
+                assert repository is not None
+                result = _publish_existing_report(
+                    args.mode,
+                    day,
+                    root,
+                    IssuePublisher(token, repository, client),
+                )
+                print(json.dumps(result, ensure_ascii=False))
+                return 0
             github = GitHubClient(token, client)
             summarizer = Summarizer(
                 api_key=environment.get("MODEL_API_KEY"),
@@ -90,26 +127,13 @@ def main(
                 model=environment.get("MODEL_NAME") or DEFAULT_MODEL_NAME,
                 client=client,
             )
-            issue_publisher = (
-                IssuePublisher(token, repository or "", client) if args.publish else None
-            )
-
             def fetch(url: str) -> bytes:
-                response = client.get(
-                    url,
-                    headers=_news_headers(url, token),
-                    timeout=20,
-                )
-                response.raise_for_status()
-                if len(response.content) > 5_000_000:
-                    raise ValueError("news source response exceeds 5 MB")
-                return response.content
+                return _fetch_news(client, url, token)
 
             dependencies = PipelineDependencies(
                 collect_github=github.collect,
                 collect_news=lambda feeds: collect_news(feeds, fetch),
                 summarize=summarizer.summarize,
-                publish_issue=issue_publisher.upsert if issue_publisher else None,
             )
             result = run_pipeline(
                 args.mode,
@@ -117,7 +141,6 @@ def main(
                 root,
                 config_path,
                 dependencies,
-                publish=args.publish,
             )
     except ConfigurationError as exc:
         _print_error(str(exc))
@@ -127,7 +150,58 @@ def main(
         return 1
 
     print(result.model_dump_json())
-    return 0 if any(status.ok for status in result.source_statuses) else 1
+    return (
+        0
+        if result.github_discovery_complete
+        and any(status.ok for status in result.source_statuses)
+        else 1
+    )
+
+
+def _fetch_news(
+    client: httpx.Client,
+    url: str,
+    token: str | None,
+    max_bytes: int = 5_000_000,
+) -> bytes:
+    chunks = bytearray()
+    with client.stream(
+        "GET",
+        url,
+        headers=_news_headers(url, token),
+        timeout=20,
+    ) as response:
+        response.raise_for_status()
+        content_length = response.headers.get("content-length")
+        if content_length and content_length.isdigit() and int(content_length) > max_bytes:
+            raise ValueError("news source response exceeds 5 MB")
+        for chunk in response.iter_bytes():
+            if len(chunks) + len(chunk) > max_bytes:
+                raise ValueError("news source response exceeds 5 MB")
+            chunks.extend(chunk)
+    return bytes(chunks)
+
+
+def _publish_existing_report(
+    mode: str,
+    day: date,
+    root: Path,
+    publisher: IssuePublisher,
+) -> dict[str, str]:
+    iso_year, iso_week, _ = day.isocalendar()
+    period = day.isoformat() if mode == "daily" else f"{iso_year}-W{iso_week:02d}"
+    report_path = root / "reports" / mode / f"{period}.md"
+    markdown = report_path.read_text(encoding="utf-8")
+    title = f"AI Agent Radar {'日报' if mode == 'daily' else '周榜'} · {period}"
+    label = "radar-daily" if mode == "daily" else "radar-weekly"
+    relative_report = report_path.relative_to(root)
+    issue_body = (
+        markdown
+        if len(markdown) <= 60_000
+        else markdown[:58_000] + f"\n\n完整报告：`{relative_report}`"
+    )
+    issue_url = publisher.upsert(title, issue_body, label)
+    return {"report_path": str(report_path), "issue_url": issue_url}
 
 
 if __name__ == "__main__":

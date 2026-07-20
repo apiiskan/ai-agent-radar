@@ -39,6 +39,50 @@ def test_collect_news_dedupes_and_preserves_failed_source() -> None:
     assert [status.ok for status in result.statuses] == [True, False]
 
 
+def test_nonempty_malformed_rss_degrades_source_instead_of_reporting_healthy_empty() -> None:
+    source = FeedConfig(
+        name="Malformed", url="https://example.com/feed", tier="trusted", kind="rss"
+    )
+
+    result = collect_news([source], lambda url: b"<rss><channel><item>")
+
+    assert result.items == ()
+    assert result.statuses[0].ok is False
+    assert result.statuses[0].error in {"ParseError", "ValueError"}
+
+
+def test_structurally_valid_empty_rss_remains_healthy() -> None:
+    source = FeedConfig(
+        name="Empty", url="https://example.com/feed", tier="trusted", kind="rss"
+    )
+
+    result = collect_news(
+        [source], lambda url: b"<rss version='2.0'><channel></channel></rss>"
+    )
+
+    assert result.items == ()
+    assert result.statuses[0].ok is True
+    assert result.statuses[0].item_count == 0
+
+
+def test_structurally_valid_rss_with_only_invalid_entries_degrades_source() -> None:
+    source = FeedConfig(
+        name="Invalid entries",
+        url="https://example.com/feed",
+        tier="trusted",
+        kind="rss",
+    )
+    payload = b"""<rss version='2.0'><channel>
+    <item><title>Missing link and date</title></item>
+    </channel></rss>"""
+
+    result = collect_news([source], lambda url: payload)
+
+    assert result.items == ()
+    assert result.statuses[0].ok is False
+    assert result.statuses[0].error == "ValueError"
+
+
 def test_collect_news_discards_non_http_relative_or_hostless_rss_links() -> None:
     feed = b"""<rss><channel>
     <item><title>Valid</title><link>https://openai.com/news/valid</link><pubDate>Sun, 19 Jul 2026 00:00:00 GMT</pubDate></item>
@@ -66,6 +110,37 @@ def test_collect_news_extracts_dated_official_html_articles() -> None:
 
     assert result.items[0].canonical_url == "https://x.ai/news/grok-5"
     assert result.items[0].title == "Grok 5"
+
+
+def test_html_error_page_and_layout_drift_degrade_source() -> None:
+    source = FeedConfig(
+        name="Official", url="https://example.com/news", tier="official", kind="html"
+    )
+
+    error_page = collect_news(
+        [source],
+        lambda url: b"<html><head><title>500 Server Error</title></head><body>failed</body></html>",
+    )
+    layout_drift = collect_news(
+        [source],
+        lambda url: b"<html><body><main><div><a href='/new'>New release</a></div></main></body></html>",
+    )
+
+    assert error_page.statuses[0].ok is False
+    assert layout_drift.statuses[0].ok is False
+
+
+def test_structurally_valid_empty_html_page_remains_healthy() -> None:
+    source = FeedConfig(
+        name="Official", url="https://example.com/news", tier="official", kind="html"
+    )
+
+    result = collect_news(
+        [source], lambda url: b"<html><body><main></main></body></html>"
+    )
+
+    assert result.items == ()
+    assert result.statuses[0].ok is True
 
 
 def test_collect_news_maps_github_release_fields() -> None:

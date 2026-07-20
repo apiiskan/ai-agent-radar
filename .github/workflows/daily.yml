@@ -18,13 +18,19 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: "3.12", cache: pip}
       - run: pip install .
-      - name: Generate and publish daily report
+      - name: Generate daily report
+        id: generate
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MODEL_API_KEY: ${{ secrets.MODEL_API_KEY }}
           MODEL_BASE_URL: ${{ vars.MODEL_BASE_URL }}
           MODEL_NAME: ${{ vars.MODEL_NAME }}
-        run: ai-agent-radar daily --publish
+        run: |
+          set +e
+          ai-agent-radar daily
+          status=$?
+          set -e
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
       - name: Commit generated data only
         run: |
           git config user.name "github-actions[bot]"
@@ -32,3 +38,11 @@ jobs:
           git add data reports
           git diff --cached --quiet || git commit -m "chore: update daily radar"
           git push
+      - name: Publish durable report
+        if: steps.generate.outputs.exit_code == '0'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ai-agent-radar publish daily
+      - name: Propagate generation status
+        if: steps.generate.outputs.exit_code != '0'
+        run: exit ${{ steps.generate.outputs.exit_code }}

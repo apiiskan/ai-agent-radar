@@ -150,7 +150,7 @@ def test_relative_config_and_repeated_date_overwrite_the_same_outputs(
     assert len(list((tmp_path / "data/snapshots").glob("2026-07-20.json"))) == 1
 
 
-def test_weekly_pipeline_uses_iso_week_history_bundles_and_issue_upsert(
+def test_weekly_pipeline_uses_iso_week_history_without_issue_side_effect(
     repo_factory, publish_calls, tmp_path, config_path
 ) -> None:
     history_path = tmp_path / "data/snapshots/2026-07-19.json"
@@ -203,21 +203,12 @@ def test_weekly_pipeline_uses_iso_week_history_bundles_and_issue_upsert(
         publish_issue=publish,
     )
 
-    result = run_pipeline(
-        "weekly",
-        date(2026, 7, 20),
-        tmp_path,
-        config_path,
-        dependencies,
-        publish=True,
-    )
+    result = run_pipeline("weekly", date(2026, 7, 20), tmp_path, config_path, dependencies)
 
     assert result.report_path.endswith("reports/weekly/2026-W30.md")
-    assert result.issue_url == "https://github.com/o/r/issues/7"
-    assert len(publish_calls) == 1
-    title, body, label = publish_calls[0]
-    assert title == "AI Agent Radar 周榜 · 2026-W30"
-    assert label == "radar-weekly"
+    assert result.issue_url is None
+    assert publish_calls == []
+    body = Path(result.report_path).read_text(encoding="utf-8")
     assert "old/dropped-agent" in body
     assert "近 1 日新增 10 stars" in body
     assert load_snapshot(Path(result.snapshot_path or ""))[0].total_score > 0
@@ -274,6 +265,120 @@ def test_pipeline_merges_source_state_and_compacts_snapshots_after_90_days(
     assert (tmp_path / "data/snapshots/2026-04.json.gz").exists()
 
 
+def test_partial_github_discovery_preserves_valid_snapshot_and_suppresses_transitions(
+    repo_factory, tmp_path, config_path
+) -> None:
+    snapshot_path = tmp_path / "data/snapshots/2026-07-20.json"
+    write_snapshot_atomic(
+        snapshot_path,
+        [
+            RepoSnapshot(
+                report_date=date(2026, 7, 20),
+                repository_id=99,
+                full_name="valid/existing",
+                stars=100,
+                forks=10,
+                open_issues=0,
+                pushed_at=None,
+                latest_release=None,
+                total_score=90,
+            )
+        ],
+    )
+    original = snapshot_path.read_bytes()
+    history_path = tmp_path / "data/snapshots/2026-07-19.json"
+    write_snapshot_atomic(
+        history_path,
+        [
+            RepoSnapshot(
+                report_date=date(2026, 7, 19),
+                repository_id=9,
+                full_name="old/would-look-dropped",
+                stars=100,
+                forks=10,
+                open_issues=0,
+                pushed_at=None,
+                latest_release=None,
+                total_score=95,
+            )
+        ],
+    )
+    dependencies = PipelineDependencies(
+        collect_github=lambda config: GitHubCollection(
+            repositories=(repo_factory(has_skill_md=True),),
+            statuses=(
+                SourceStatus(name="github:ok", ok=True, item_count=1),
+                SourceStatus(name="github:failed", ok=False, error="Timeout"),
+            ),
+            rate_remaining=20,
+            complete=False,
+            queries_total=2,
+            queries_succeeded=1,
+        ),
+        collect_news=lambda feeds: NewsCollection(items=(), statuses=()),
+        summarize=lambda repo, score: ProjectSummary(
+            one_line=repo.description,
+            audience="开发者",
+            why_now="；".join(score.reasons),
+            enhanced=False,
+        ),
+    )
+
+    result = run_pipeline("weekly", date(2026, 7, 20), tmp_path, config_path, dependencies)
+    report = Path(result.report_path).read_text(encoding="utf-8")
+
+    assert snapshot_path.read_bytes() == original
+    assert "GitHub 发现不完整" in report
+    assert "old/would-look-dropped" not in report
+    assert result.github_discovery_complete is False
+    assert result.github_queries_succeeded == 1
+    assert result.github_queries_total == 2
+    assert result.sources_succeeded == 1
+    assert result.sources_failed == 1
+
+
+def test_all_failed_github_discovery_never_overwrites_valid_snapshot(
+    tmp_path, config_path
+) -> None:
+    snapshot_path = tmp_path / "data/snapshots/2026-07-20.json"
+    write_snapshot_atomic(
+        snapshot_path,
+        [
+            RepoSnapshot(
+                report_date=date(2026, 7, 20),
+                repository_id=99,
+                full_name="valid/existing",
+                stars=100,
+                forks=10,
+                open_issues=0,
+                pushed_at=None,
+                latest_release=None,
+                total_score=90,
+            )
+        ],
+    )
+    original = snapshot_path.read_bytes()
+    dependencies = PipelineDependencies(
+        collect_github=lambda config: GitHubCollection(
+            repositories=(),
+            statuses=(SourceStatus(name="github:failed", ok=False, error="Timeout"),),
+            rate_remaining=None,
+            complete=False,
+            queries_total=1,
+            queries_succeeded=0,
+        ),
+        collect_news=lambda feeds: NewsCollection(items=(), statuses=()),
+        summarize=lambda repo, score: pytest.fail("no repository should be summarized"),
+    )
+
+    result = run_pipeline("daily", date(2026, 7, 20), tmp_path, config_path, dependencies)
+
+    assert snapshot_path.read_bytes() == original
+    assert Path(result.report_path).exists()
+    assert (tmp_path / "data/state/sources.json").exists()
+    assert result.github_discovery_complete is False
+
+
 def test_pipeline_rejects_publish_without_publisher_before_collecting(
     tmp_path, config_path
 ) -> None:
@@ -290,7 +395,7 @@ def test_pipeline_rejects_publish_without_publisher_before_collecting(
         summarize=lambda repo, score: pytest.fail("nothing should be summarized"),
     )
 
-    with pytest.raises(ValueError, match="publish requested without an Issue publisher"):
+    with pytest.raises(ValueError, match="publish existing report"):
         run_pipeline(
             "daily",
             date(2026, 7, 20),

@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 from .models import NewsRecord, RepoRecord, ScoreBreakdown, SourceStatus
 from .summarize import ProjectSummary
+from .trends import WeeklyChartAnalysis
 
 RankedItem = tuple[RepoRecord, ScoreBreakdown, ProjectSummary]
 
@@ -28,6 +29,8 @@ class ReportBundle:
     categories: Mapping[str, tuple[RankedItem, ...]]
     news: tuple[NewsRecord, ...]
     statuses: tuple[SourceStatus, ...]
+    weekly_analysis: WeeklyChartAnalysis | None = None
+    discovery_complete: bool = True
 
 
 def render_daily(
@@ -51,6 +54,13 @@ def render_daily(
         ),
         "",
     ]
+    if not bundle.discovery_complete:
+        lines.extend(
+            [
+                "- ⚠️ GitHub 发现不完整；本期为降级结果，不应据此判断项目消失或掉榜。",
+                "",
+            ]
+        )
     for title, items in (
         ("今日新发现", bundle.new),
         ("增长最快", bundle.rising),
@@ -73,20 +83,97 @@ def render_daily(
 def render_weekly(day: date, bundle: ReportBundle, top_limit: int = 20) -> str:
     """Render the weekly ranking report with a deterministic ordering and item limit."""
     _validate_limit(top_limit)
+    analysis = bundle.weekly_analysis or WeeklyChartAnalysis.insufficient(
+        "未提供可比较的历史榜单"
+    )
     lines = [f"# AI Agent Radar 周榜 · 截至 {day.isoformat()}", ""]
-    for title, items in (
-        (f"综合热度 Top {top_limit}", bundle.ranked),
-        ("新上榜", bundle.new),
-    ):
-        lines.extend(_item_section(title, items, top_limit))
+    lines.extend(
+        [
+            f"## 综合热度 Top {top_limit}",
+            "",
+            *_repo_lines(bundle.ranked[:top_limit], analysis.rank_changes),
+            "",
+        ]
+    )
+    if analysis.history_sufficient:
+        lines.extend(
+            _item_section(
+                "新上榜", _select_items(bundle.ranked, analysis.new_ids), top_limit
+            )
+        )
+        lines.extend(
+            [
+                "## 掉榜",
+                "",
+                *_dropped_lines(tuple(item.full_name for item in analysis.dropped)),
+                "",
+            ]
+        )
+        lines.extend(
+            _item_section(
+                "本周黑马",
+                _select_items(bundle.ranked, analysis.dark_horse_ids),
+                top_limit,
+            )
+        )
+    else:
+        for title in ("新上榜", "掉榜", "本周黑马"):
+            lines.extend(_insufficient_section(title, analysis.insufficient_reason))
 
-    lines.extend(["## 掉榜", "", *_dropped_lines(bundle.dropped), ""])
-    for title, items in (
-        ("本周黑马", bundle.new),
-        ("连续升温", bundle.rising),
-        ("值得立即试用", bundle.useful),
-    ):
-        lines.extend(_item_section(title, items, top_limit))
+    if analysis.warming_history_sufficient:
+        lines.extend(
+            _item_section(
+                "连续升温",
+                _select_items(bundle.ranked, analysis.continuous_warming_ids),
+                top_limit,
+            )
+        )
+    else:
+        lines.extend(
+            _insufficient_section("连续升温", "连续升温至少需要 4 个完整日期快照")
+        )
+
+    lines.extend(["## 分类榜与份额变化", ""])
+    if not bundle.categories:
+        lines.extend(["- 暂无分类项目。", ""])
+    else:
+        for category, items in sorted(bundle.categories.items()):
+            lines.extend([f"### {_escape_text(category)}", "", *_repo_lines(items[:top_limit])])
+            share = analysis.category_current_shares.get(
+                category, _category_share_from_bundle(bundle, category)
+            )
+            if analysis.history_sufficient:
+                change = analysis.category_share_changes.get(category, 0.0)
+                lines.extend(
+                    [
+                        f"- 份额：{_escape_text(category)}：{share:.1f}%（较上期 {change:+.1f} 个百分点）",
+                        "",
+                    ]
+                )
+            else:
+                lines.extend(
+                    [
+                        f"- 份额：{share:.1f}%（历史数据不足，无法计算变化）",
+                        "",
+                    ]
+                )
+
+    lines.extend(["## Star 增长趋势", ""])
+    if analysis.growth_history_sufficient:
+        lines.extend(
+            [
+                (
+                    f"- Top {top_limit} 合计新增 {analysis.stars_growth_total} stars；"
+                    f"{analysis.stars_growth_positive} 个增长，"
+                    f"{analysis.stars_growth_flat} 个持平。"
+                ),
+                "",
+            ]
+        )
+    else:
+        lines.extend(["- 历史数据不足，尚不能形成可信的 7 日 Star 增长趋势。", ""])
+
+    lines.extend(_item_section("值得立即试用", bundle.useful, top_limit))
 
     official_news = tuple(item for item in bundle.news if item.tier == "official")
     lines.extend(["## 本周重要官方更新", "", *_news_lines(official_news), ""])
@@ -98,6 +185,11 @@ def render_weekly(day: date, bundle: ReportBundle, top_limit: int = 20) -> str:
             "",
             "## 数据完整性",
             "",
+            *(
+                []
+                if bundle.discovery_complete
+                else ["- ⚠️ GitHub 发现不完整；已抑制消失、掉榜和榜单迁移结论。"]
+            ),
             *_status_lines(bundle.statuses),
             "",
         ]
@@ -130,12 +222,15 @@ def _item_section(title: str, items: tuple[RankedItem, ...], limit: int) -> list
     return [f"## {title}", "", *_repo_lines(items[:limit]), ""]
 
 
-def _repo_lines(items: tuple[RankedItem, ...]) -> list[str]:
+def _repo_lines(
+    items: tuple[RankedItem, ...], rank_changes: Mapping[int, int] | None = None
+) -> list[str]:
     if not items:
         return ["- 暂无符合质量门槛的条目。"]
     return [
         f"{index}. {_link_or_text(repo.full_name, repo.url)} — {_escape_text(summary.one_line)}\n"
         f"   综合分 `{score.total:g}`；{_reasons_text(score.reasons)}"
+        f"{_rank_change_text((rank_changes or {}).get(repo.repository_id))}"
         for index, (repo, score, summary) in enumerate(items, 1)
     ]
 
@@ -164,6 +259,33 @@ def _dropped_lines(dropped: tuple[str, ...]) -> list[str]:
     if not dropped:
         return ["- 本周无掉榜项目。"]
     return [f"- {_escape_text(name)}" for name in sorted(dropped)]
+
+
+def _select_items(items: tuple[RankedItem, ...], ids: tuple[int, ...]) -> tuple[RankedItem, ...]:
+    wanted = set(ids)
+    return tuple(item for item in items if item[0].repository_id in wanted)
+
+
+def _insufficient_section(title: str, reason: str | None) -> list[str]:
+    detail = _escape_text(reason or "缺少完整的上一期榜单")
+    return [f"## {title}", "", f"- 历史数据不足：{detail}。", ""]
+
+
+def _rank_change_text(change: int | None) -> str:
+    if change is None:
+        return ""
+    if change > 0:
+        return f"；较上期上升 {change} 位"
+    if change < 0:
+        return f"；较上期下降 {abs(change)} 位"
+    return "；较上期持平"
+
+
+def _category_share_from_bundle(bundle: ReportBundle, category: str) -> float:
+    if not bundle.ranked:
+        return 0.0
+    repository_ids = {item[0].repository_id for item in bundle.categories.get(category, ())}
+    return round(len(repository_ids) * 100 / len(bundle.ranked), 1)
 
 
 def _reasons_text(reasons: tuple[str, ...]) -> str:

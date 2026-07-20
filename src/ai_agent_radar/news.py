@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from urllib.parse import urljoin, urlsplit
+from xml.etree import ElementTree
 
 import feedparser
 from bs4 import BeautifulSoup
@@ -77,8 +78,10 @@ def _merge_similar_events(records: list[NewsRecord]) -> list[NewsRecord]:
 
 
 def _parse_rss(source: FeedConfig, payload: bytes) -> list[NewsRecord]:
+    _validate_feed_document(payload)
+    parsed = feedparser.parse(payload)
     records: list[NewsRecord] = []
-    for entry in feedparser.parse(payload).entries:
+    for entry in parsed.entries:
         link = entry.get("link")
         published_parts = entry.get("published_parsed") or entry.get("updated_parsed")
         if not isinstance(link, str) or not published_parts or not _is_absolute_http_url(link):
@@ -96,6 +99,8 @@ def _parse_rss(source: FeedConfig, payload: bytes) -> list[NewsRecord]:
                 summary=summary if isinstance(summary, str) else "",
             )
         )
+    if parsed.entries and not records:
+        raise ValueError("RSS/Atom source contained no valid dated entries")
     return records
 
 
@@ -153,9 +158,15 @@ def _is_absolute_http_url(url: str) -> bool:
 
 def _parse_html(source: FeedConfig, payload: bytes) -> list[NewsRecord]:
     soup = BeautifulSoup(payload, "html.parser")
+    main = soup.select_one("main")
+    if main is None:
+        raise ValueError("HTML source is not a recognized news page")
     source_parts = urlsplit(source.url)
     records: list[NewsRecord] = []
-    for article in soup.select("article"):
+    articles = soup.select("article")
+    if not articles and (main.get_text(" ", strip=True) or main.select_one("a[href]")):
+        raise ValueError("HTML source layout no longer contains article elements")
+    for article in articles:
         link = article.select_one("a[href]")
         time = article.select_one("time[datetime]")
         if link is None or time is None:
@@ -181,9 +192,25 @@ def _parse_html(source: FeedConfig, payload: bytes) -> list[NewsRecord]:
                 summary=article.get_text(" ", strip=True)[:1000],
             )
         )
+    if articles and not records:
+        raise ValueError("HTML source contained no valid dated articles")
     return records
 
 
 def _parse_datetime(value: str) -> datetime:
     published = datetime.fromisoformat(value.replace("Z", "+00:00"))
     return published.replace(tzinfo=timezone.utc) if published.tzinfo is None else published
+
+
+def _validate_feed_document(payload: bytes) -> None:
+    if not payload.strip():
+        raise ValueError("RSS/Atom source is empty")
+    root = ElementTree.fromstring(payload)
+    local_name = root.tag.rsplit("}", 1)[-1].casefold()
+    if local_name == "rss":
+        if not any(child.tag.rsplit("}", 1)[-1].casefold() == "channel" for child in root):
+            raise ValueError("RSS document is missing channel")
+        return
+    if local_name in {"feed", "rdf"}:
+        return
+    raise ValueError("source is not an RSS or Atom document")

@@ -28,11 +28,19 @@ class RepoRecord(FrozenModel):
     license_spdx: str | None = None
     language: str | None = None
     latest_release: str | None = None
+    latest_release_published_at: datetime | None = None
+    release_detail_valid: bool = False
+    readme_detail_valid: bool = False
+    root_detail_valid: bool = False
     readme: str = ""
     has_skill_md: bool = False
     has_mcp: bool = False
     has_examples: bool = False
     has_tests: bool = False
+    has_executable_code: bool = False
+    has_runnable_entrypoint: bool = False
+    fork_ahead_by: int | None = None
+    parent_pushed_at: datetime | None = None
     matched_categories: tuple[str, ...] = ()
 
 
@@ -56,6 +64,8 @@ class RepoSnapshot(FrozenModel):
     pushed_at: datetime | None
     latest_release: str | None
     total_score: float = 0.0
+    categories: tuple[str, ...] = ()
+    discovery_complete: bool = True
 
 
 class TrendMetrics(FrozenModel):
@@ -95,3 +105,9 @@ class RunResult(FrozenModel):
     filtered: int
     ranked: int
     source_statuses: tuple[SourceStatus, ...]
+    github_discovery_complete: bool = True
+    github_queries_succeeded: int = 0
+    github_queries_total: int = 0
+    sources_succeeded: int = 0
+    sources_failed: int = 0
+    degraded: bool = False

@@ -13,3 +13,10 @@ feeds:
 weights: {heat: 45, utility: 25, freshness: 20, relevance: 10}
 limits: {search_per_query: 30, daily_top: 10, weekly_top: 20}
 exclusions: {repositories: [], keywords: ["awesome list mirror", "SEO"]}
+quality:
+  recent_release_days: 90
+  fork_min_ahead_commits: 3
+  official_organizations: [openai, anthropics, xai-org, MoonshotAI]
+  trusted_topics: [agent, ai-agent, agent-skills, mcp, codex, claude-code]
+  allow_official_relevance_exception: true
+  keyword_stuffing_ratio: 0.45

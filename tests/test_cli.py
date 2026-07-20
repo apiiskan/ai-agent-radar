@@ -1,6 +1,7 @@
 import json
-from datetime import date
+from datetime import date, datetime, timezone
 
+import httpx
 import pytest
 
 import ai_agent_radar.cli as cli
@@ -16,6 +17,15 @@ def test_cli_defaults_to_dry_run() -> None:
 
     assert args.publish is False
     assert args.mode == "daily"
+
+
+def test_publish_subcommand_is_explicit_and_targets_an_existing_report() -> None:
+    args = build_parser().parse_args(
+        ["publish", "weekly", "--date", "2026-07-20"]
+    )
+
+    assert args.publish is True
+    assert args.mode == "weekly"
 
 
 @pytest.mark.parametrize(
@@ -77,6 +87,107 @@ def test_cli_returns_two_for_missing_publish_preconditions_without_leaking_secre
     assert exit_code == 2
     assert payload == {"ok": False, "error": message}
     assert "top-secret" not in json.dumps(payload)
+
+
+@pytest.mark.parametrize("requested", (date(2026, 7, 19), date(2026, 7, 21)))
+def test_live_generation_rejects_non_current_dates_before_network_collection(
+    requested, tmp_path, config_path, monkeypatch, capsys
+) -> None:
+    def unexpected_client(*args, **kwargs):
+        raise AssertionError("network client must not be created")
+
+    monkeypatch.setattr(cli.httpx, "Client", unexpected_client)
+
+    exit_code = cli.main(
+        [
+            "daily",
+            "--date",
+            requested.isoformat(),
+            "--root",
+            str(tmp_path),
+            "--config",
+            str(config_path),
+        ],
+        {"GITHUB_TOKEN": "top-secret"},
+        now=lambda: datetime(2026, 7, 20, 1, tzinfo=timezone.utc),
+    )
+
+    assert exit_code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert "must equal current date" in payload["error"]
+    assert "top-secret" not in json.dumps(payload)
+
+
+def test_publish_reads_durable_report_without_running_collection(
+    tmp_path, config_path, monkeypatch, capsys
+) -> None:
+    report_path = tmp_path / "reports/daily/2026-07-20.md"
+    report_path.parent.mkdir(parents=True)
+    report_path.write_text("# durable report\n", encoding="utf-8")
+    calls: list[tuple[str, str, str]] = []
+
+    class CapturingPublisher:
+        def __init__(self, token, repository, client) -> None:
+            assert token == "top-secret"
+            assert repository == "o/r"
+
+        def upsert(self, title, body, label) -> str:
+            calls.append((title, body, label))
+            return "https://github.com/o/r/issues/7"
+
+    monkeypatch.setattr(cli, "IssuePublisher", CapturingPublisher)
+    monkeypatch.setattr(
+        cli,
+        "run_pipeline",
+        lambda *args, **kwargs: pytest.fail("publishing must not collect or generate"),
+    )
+
+    exit_code = cli.main(
+        [
+            "publish",
+            "daily",
+            "--date",
+            "2026-07-20",
+            "--root",
+            str(tmp_path),
+            "--config",
+            str(config_path),
+        ],
+        {"GITHUB_TOKEN": "top-secret", "GITHUB_REPOSITORY": "o/r"},
+    )
+
+    assert exit_code == 0
+    assert calls == [
+        (
+            "AI Agent Radar 日报 · 2026-07-20",
+            "# durable report\n",
+            "radar-daily",
+        )
+    ]
+    assert json.loads(capsys.readouterr().out)["issue_url"].endswith("/7")
+
+
+def test_news_fetch_stops_streaming_immediately_after_five_megabytes() -> None:
+    class CountingStream(httpx.SyncByteStream):
+        def __init__(self) -> None:
+            self.yielded = 0
+
+        def __iter__(self):
+            for chunk in (b"a" * 4_000_000, b"b" * 1_100_001, b"secret-tail"):
+                self.yielded += 1
+                yield chunk
+
+    stream = CountingStream()
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(200, stream=stream)
+    )
+
+    with httpx.Client(transport=transport) as client:
+        with pytest.raises(ValueError, match="exceeds 5 MB") as error:
+            cli._fetch_news(client, "https://example.com/feed", None)
+
+    assert stream.yielded == 2
+    assert "secret-tail" not in str(error.value)
 
 
 @pytest.mark.parametrize(("healthy", "expected_exit"), [(True, 0), (False, 1)])

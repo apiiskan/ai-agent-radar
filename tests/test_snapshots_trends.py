@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 
 from ai_agent_radar.snapshots import compact_old_snapshots, load_snapshot, write_snapshot_atomic
-from ai_agent_radar.trends import calculate_trend
+from ai_agent_radar.trends import analyze_weekly_charts, calculate_trend
 
 
 def test_write_snapshot_atomic_round_trips_snapshot_data(tmp_path, snapshot_factory) -> None:
@@ -45,6 +45,175 @@ def test_calculate_trend_ignores_non_historical_data_and_clamps_negative_deltas(
     assert trend.forks_7d == 0
     assert trend.active_days_7d == 1
     assert trend.new_release is True
+
+
+def test_release_detail_loss_does_not_fabricate_a_new_release(snapshot_factory) -> None:
+    current = snapshot_factory(
+        report_date=date(2026, 7, 20),
+        latest_release=None,
+    )
+    history = [
+        snapshot_factory(report_date=date(2026, 7, 19), latest_release="v1.0.0")
+    ]
+
+    trend = calculate_trend(current, history)
+
+    assert trend.new_release is False
+
+
+def test_weekly_chart_compares_top_membership_and_populates_rank_change(
+    snapshot_factory,
+) -> None:
+    history = [
+        snapshot_factory(
+            report_date=date(2026, 7, 19),
+            repository_id=1,
+            full_name="acme/one",
+            total_score=90,
+            categories=("codex",),
+        ),
+        snapshot_factory(
+            report_date=date(2026, 7, 19),
+            repository_id=2,
+            full_name="acme/two",
+            total_score=80,
+            categories=("codex",),
+        ),
+    ]
+    current = [
+        snapshot_factory(
+            repository_id=2,
+            full_name="acme/two",
+            total_score=95,
+            categories=("codex",),
+        ),
+        snapshot_factory(
+            repository_id=3,
+            full_name="acme/three",
+            total_score=85,
+            categories=("general",),
+        ),
+    ]
+
+    analysis = analyze_weekly_charts(current, history, top_limit=2)
+
+    assert analysis.history_sufficient is True
+    assert analysis.new_ids == (3,)
+    assert tuple(item.repository_id for item in analysis.dropped) == (1,)
+    assert analysis.rank_changes == {2: 1}
+    assert analysis.category_share_changes == {"codex": -50.0, "general": 50.0}
+
+
+def test_weekly_warming_requires_three_repeated_positive_intervals_and_excludes_flat(
+    snapshot_factory,
+) -> None:
+    history = []
+    for snapshot_day, warming_stars, flat_stars in (
+        (date(2026, 7, 17), 10, 10),
+        (date(2026, 7, 18), 12, 10),
+        (date(2026, 7, 19), 15, 10),
+    ):
+        history.extend(
+            [
+                snapshot_factory(
+                    report_date=snapshot_day,
+                    repository_id=1,
+                    full_name="acme/warming",
+                    stars=warming_stars,
+                    total_score=80,
+                ),
+                snapshot_factory(
+                    report_date=snapshot_day,
+                    repository_id=2,
+                    full_name="acme/flat",
+                    stars=flat_stars,
+                    total_score=70,
+                ),
+            ]
+        )
+    current = [
+        snapshot_factory(
+            repository_id=1,
+            full_name="acme/warming",
+            stars=19,
+            total_score=90,
+        ),
+        snapshot_factory(
+            repository_id=2,
+            full_name="acme/flat",
+            stars=10,
+            total_score=85,
+        ),
+    ]
+
+    analysis = analyze_weekly_charts(current, history, top_limit=2)
+
+    assert analysis.warming_history_sufficient is True
+    assert analysis.continuous_warming_ids == (1,)
+
+
+def test_weekly_dark_horse_requires_new_entry_absolute_and_relative_growth(
+    snapshot_factory,
+) -> None:
+    history = []
+    for snapshot_day, incumbent_stars, entrant_stars in (
+        (date(2026, 7, 13), 100, 10),
+        (date(2026, 7, 17), 103, 12),
+        (date(2026, 7, 19), 105, 15),
+    ):
+        history.extend(
+            [
+                snapshot_factory(
+                    report_date=snapshot_day,
+                    repository_id=1,
+                    full_name="acme/incumbent",
+                    stars=incumbent_stars,
+                    total_score=90,
+                ),
+                snapshot_factory(
+                    report_date=snapshot_day,
+                    repository_id=2,
+                    full_name="acme/entrant",
+                    stars=entrant_stars,
+                    total_score=10,
+                ),
+            ]
+        )
+    current = [
+        snapshot_factory(
+            repository_id=1,
+            full_name="acme/incumbent",
+            stars=106,
+            total_score=95,
+        ),
+        snapshot_factory(
+            repository_id=2,
+            full_name="acme/entrant",
+            stars=40,
+            total_score=99,
+        ),
+    ]
+
+    analysis = analyze_weekly_charts(current, history, top_limit=1)
+
+    assert analysis.new_ids == (2,)
+    assert analysis.dark_horse_ids == (2,)
+    assert analysis.growth_history_sufficient is True
+    assert analysis.stars_growth_total == 30
+
+
+def test_weekly_analysis_marks_first_snapshot_as_insufficient(snapshot_factory) -> None:
+    analysis = analyze_weekly_charts(
+        [snapshot_factory(total_score=90)], [], top_limit=20
+    )
+
+    assert analysis.history_sufficient is False
+    assert analysis.warming_history_sufficient is False
+    assert analysis.growth_history_sufficient is False
+    assert analysis.new_ids == ()
+    assert analysis.dropped == ()
+    assert analysis.continuous_warming_ids == ()
+    assert analysis.dark_horse_ids == ()
 
 
 def test_compact_old_snapshots_creates_month_archives_for_old_daily_files(
