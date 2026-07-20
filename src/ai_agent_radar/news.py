@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from urllib.parse import urljoin, urlsplit
 
@@ -52,7 +52,7 @@ def _merge_similar_events(records: list[NewsRecord]) -> list[NewsRecord]:
             (
                 index
                 for index, item in enumerate(merged)
-                if abs((record.published_at - item.published_at).days) <= 2
+                if abs(record.published_at - item.published_at) <= timedelta(days=2)
                 and SequenceMatcher(
                     None, normalize_text(record.title), normalize_text(item.title)
                 ).ratio()
@@ -75,7 +75,7 @@ def _parse_rss(source: FeedConfig, payload: bytes) -> list[NewsRecord]:
     for entry in feedparser.parse(payload).entries:
         link = entry.get("link")
         published_parts = entry.get("published_parsed") or entry.get("updated_parsed")
-        if not isinstance(link, str) or not published_parts:
+        if not isinstance(link, str) or not published_parts or not _is_absolute_http_url(link):
             continue
         published = datetime(*published_parts[:6], tzinfo=timezone.utc)
         title = entry.get("title", "Untitled")
@@ -91,6 +91,14 @@ def _parse_rss(source: FeedConfig, payload: bytes) -> list[NewsRecord]:
             )
         )
     return records
+
+
+def _is_absolute_http_url(url: str) -> bool:
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return False
+    return parts.scheme.lower() in {"http", "https"} and bool(parts.netloc)
 
 
 def _parse_html(source: FeedConfig, payload: bytes) -> list[NewsRecord]:

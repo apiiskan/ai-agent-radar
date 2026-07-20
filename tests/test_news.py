@@ -9,6 +9,12 @@ def test_canonicalize_url_removes_tracking_and_fragment() -> None:
     assert canonicalize_url(url) == "https://openai.com/news/codex"
 
 
+def test_canonicalize_url_preserves_blank_non_tracking_query_values() -> None:
+    url = "https://OpenAI.com/news/codex/?edition=&utm_source=x&ref=home&source=rss#top"
+
+    assert canonicalize_url(url) == "https://openai.com/news/codex?edition="
+
+
 def test_collect_news_dedupes_and_preserves_failed_source() -> None:
     feed = b"""<rss><channel><item><title>Codex update</title>
     <link>https://openai.com/news/codex?utm_source=rss</link>
@@ -29,6 +35,22 @@ def test_collect_news_dedupes_and_preserves_failed_source() -> None:
     assert len(result.items) == 1
     assert result.items[0].canonical_url == "https://openai.com/news/codex"
     assert [status.ok for status in result.statuses] == [True, False]
+
+
+def test_collect_news_discards_non_http_or_relative_rss_links() -> None:
+    feed = b"""<rss><channel>
+    <item><title>Valid</title><link>https://openai.com/news/valid</link><pubDate>Sun, 19 Jul 2026 00:00:00 GMT</pubDate></item>
+    <item><title>Script</title><link>javascript:alert(1)</link><pubDate>Sun, 19 Jul 2026 00:00:00 GMT</pubDate></item>
+    <item><title>Mail</title><link>mailto:news@example.com</link><pubDate>Sun, 19 Jul 2026 00:00:00 GMT</pubDate></item>
+    <item><title>Relative</title><link>/news/relative</link><pubDate>Sun, 19 Jul 2026 00:00:00 GMT</pubDate></item>
+    </channel></rss>"""
+    source = FeedConfig(name="OpenAI", url="https://openai.com/feed", tier="official")
+
+    result = collect_news([source], lambda url: feed)
+
+    assert [(item.title, item.canonical_url) for item in result.items] == [
+        ("Valid", "https://openai.com/news/valid")
+    ]
 
 
 def test_collect_news_extracts_dated_official_html_articles() -> None:
@@ -72,3 +94,21 @@ def test_collect_news_merges_same_event_and_keeps_official_primary() -> None:
     assert len(result.items) == 1
     assert result.items[0].source == "Anthropic"
     assert result.items[0].related_urls == ("https://example.com/claude-agent-teams",)
+
+
+def test_collect_news_does_not_merge_events_more_than_two_days_apart() -> None:
+    official = b"""<rss><channel><item><title>Agent teams launch</title>
+    <link>https://anthropic.com/news/agent-teams</link><pubDate>Sun, 19 Jul 2026 00:00:00 GMT</pubDate>
+    </item></channel></rss>"""
+    trusted = official.replace(
+        b"https://anthropic.com/news/agent-teams</link><pubDate>Sun, 19 Jul 2026 00:00:00 GMT",
+        b"https://example.com/agent-teams</link><pubDate>Tue, 21 Jul 2026 23:59:00 GMT",
+    )
+    sources = [
+        FeedConfig(name="Anthropic", url="https://official", tier="official"),
+        FeedConfig(name="Industry", url="https://trusted", tier="trusted"),
+    ]
+
+    result = collect_news(sources, lambda url: official if url.endswith("official") else trusted)
+
+    assert len(result.items) == 2
