@@ -102,6 +102,30 @@ def test_collect_stops_after_403_with_retry_after(radar_config) -> None:
     assert client.limited is True
 
 
+def test_collect_keeps_repository_when_detail_payloads_are_malformed(radar_config) -> None:
+    fixture = Path(__file__).with_name("fixtures") / "github_search.json"
+    payload = json.loads(fixture.read_text(encoding="utf-8"))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/search/repositories":
+            return httpx.Response(200, json=payload)
+        if request.url.path.endswith("/readme"):
+            return httpx.Response(404)
+        if request.url.path.endswith("/releases/latest"):
+            return httpx.Response(200, json={"tag_name": 123})
+        if request.url.path.endswith("/contents"):
+            return httpx.Response(200, json=["not-a-mapping", {"name": None}, {"name": "SKILL.md"}])
+        raise AssertionError(request.url.path)
+
+    client = GitHubClient("token", httpx.Client(transport=httpx.MockTransport(handler)))
+
+    collection = client.collect(radar_config)
+
+    assert len(collection.repositories) == 1
+    assert collection.repositories[0].latest_release is None
+    assert collection.repositories[0].has_skill_md is True
+
+
 def test_enrich_reads_readme_release_and_root_capabilities(repo_factory) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/readme"):

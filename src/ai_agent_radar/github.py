@@ -108,11 +108,20 @@ class GitHubClient:
                 )
             except (TypeError, ValueError):
                 content = ""
-        names = {item.get("name", "").casefold() for item in root} if isinstance(root, list) else set()
+        names: set[str] = set()
+        if isinstance(root, list):
+            for item in root:
+                if isinstance(item, dict):
+                    name = item.get("name")
+                    if isinstance(name, str):
+                        names.add(name.casefold())
+        latest_release = release.get("tag_name") if isinstance(release, dict) else None
+        if not isinstance(latest_release, str):
+            latest_release = None
         return repo.model_copy(
             update={
                 "readme": content[:20_000],
-                "latest_release": release.get("tag_name") if isinstance(release, dict) else None,
+                "latest_release": latest_release,
                 "has_skill_md": "skill.md" in names,
                 "has_mcp": any("mcp" in name for name in names),
                 "has_examples": any(name in {"example", "examples", "demo", "demos"} for name in names),
