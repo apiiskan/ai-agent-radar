@@ -89,7 +89,7 @@ class Summarizer:
             one_line = f"{repo.full_name[:MAX_REPOSITORY_NAME_LENGTH]} 是一个 AI Agent 相关项目。"
         why_now = "；".join(
             reason[:MAX_REASON_LENGTH] for reason in score.reasons[:MAX_REASONS]
-        )[:MAX_WHY_NOW_LENGTH]
+        ).strip()[:MAX_WHY_NOW_LENGTH]
         return ProjectSummary(
             one_line=one_line,
             audience="希望试用相关 Agent 工具的开发者",

@@ -16,6 +16,15 @@ def test_without_key_uses_deterministic_template(repo_factory, score_factory) ->
     assert result.audience == "希望试用相关 Agent 工具的开发者"
 
 
+def test_without_key_normalizes_whitespace_only_reasons(repo_factory, score_factory) -> None:
+    result = Summarizer(api_key=None).summarize(
+        repo_factory(), score_factory(reasons=("   ",))
+    )
+
+    assert result.enhanced is False
+    assert result.why_now == "评分依据不足。"
+
+
 def test_http_error_falls_back(repo_factory, score_factory) -> None:
     transport = httpx.MockTransport(lambda request: httpx.Response(503))
     result = Summarizer(api_key="secret", client=httpx.Client(transport=transport)).summarize(
