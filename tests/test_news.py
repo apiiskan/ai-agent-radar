@@ -37,12 +37,14 @@ def test_collect_news_dedupes_and_preserves_failed_source() -> None:
     assert [status.ok for status in result.statuses] == [True, False]
 
 
-def test_collect_news_discards_non_http_or_relative_rss_links() -> None:
+def test_collect_news_discards_non_http_relative_or_hostless_rss_links() -> None:
     feed = b"""<rss><channel>
     <item><title>Valid</title><link>https://openai.com/news/valid</link><pubDate>Sun, 19 Jul 2026 00:00:00 GMT</pubDate></item>
     <item><title>Script</title><link>javascript:alert(1)</link><pubDate>Sun, 19 Jul 2026 00:00:00 GMT</pubDate></item>
     <item><title>Mail</title><link>mailto:news@example.com</link><pubDate>Sun, 19 Jul 2026 00:00:00 GMT</pubDate></item>
     <item><title>Relative</title><link>/news/relative</link><pubDate>Sun, 19 Jul 2026 00:00:00 GMT</pubDate></item>
+    <item><title>User only</title><link>https://user@/article</link><pubDate>Sun, 19 Jul 2026 00:00:00 GMT</pubDate></item>
+    <item><title>Port only</title><link>https://:443/article</link><pubDate>Sun, 19 Jul 2026 00:00:00 GMT</pubDate></item>
     </channel></rss>"""
     source = FeedConfig(name="OpenAI", url="https://openai.com/feed", tier="official")
 
@@ -112,3 +114,22 @@ def test_collect_news_does_not_merge_events_more_than_two_days_apart() -> None:
     result = collect_news(sources, lambda url: official if url.endswith("official") else trusted)
 
     assert len(result.items) == 2
+
+
+def test_collect_news_merges_events_exactly_two_days_apart() -> None:
+    official = b"""<rss><channel><item><title>Agent teams launch</title>
+    <link>https://anthropic.com/news/agent-teams</link><pubDate>Sun, 19 Jul 2026 00:00:00 GMT</pubDate>
+    </item></channel></rss>"""
+    trusted = official.replace(
+        b"https://anthropic.com/news/agent-teams</link><pubDate>Sun, 19 Jul 2026 00:00:00 GMT",
+        b"https://example.com/agent-teams</link><pubDate>Tue, 21 Jul 2026 00:00:00 GMT",
+    )
+    sources = [
+        FeedConfig(name="Anthropic", url="https://official", tier="official"),
+        FeedConfig(name="Industry", url="https://trusted", tier="trusted"),
+    ]
+
+    result = collect_news(sources, lambda url: official if url.endswith("official") else trusted)
+
+    assert len(result.items) == 1
+    assert result.items[0].related_urls == ("https://example.com/agent-teams",)

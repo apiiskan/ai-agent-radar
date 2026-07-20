@@ -98,7 +98,7 @@ def _is_absolute_http_url(url: str) -> bool:
         parts = urlsplit(url)
     except ValueError:
         return False
-    return parts.scheme.lower() in {"http", "https"} and bool(parts.netloc)
+    return parts.scheme.lower() in {"http", "https"} and bool(parts.hostname)
 
 
 def _parse_html(source: FeedConfig, payload: bytes) -> list[NewsRecord]:
