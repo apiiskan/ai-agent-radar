@@ -1,8 +1,10 @@
 from datetime import date, datetime, timezone
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+import ai_agent_radar.reporting as reporting
 from ai_agent_radar.models import NewsRecord, SourceStatus
 from ai_agent_radar.reporting import ReportBundle, render_daily, render_weekly, write_report_atomic
 from ai_agent_radar.summarize import ProjectSummary
@@ -58,6 +60,59 @@ def test_weekly_matches_golden_and_contains_rank_movement_and_recommendations(re
         assert f"## {heading}" in markdown
 
 
+def test_daily_empty_categories_matches_golden(report_bundle) -> None:
+    markdown = render_daily(date(2026, 7, 20), replace(report_bundle, categories={}))
+
+    assert markdown == (Path(__file__).parent / "golden" / "daily_empty_categories.md").read_text(encoding="utf-8")
+
+
+def test_weekly_uses_custom_top_limit_in_heading_and_content(report_bundle) -> None:
+    markdown = render_weekly(date(2026, 7, 20), report_bundle, top_limit=5)
+
+    assert "## 综合热度 Top 5" in markdown
+    assert "## 综合热度 Top 20" not in markdown
+
+
+def test_weekly_official_updates_exclude_trusted_and_custom_news(report_bundle) -> None:
+    trusted = NewsRecord(
+        canonical_url="https://trusted.example/news",
+        title="Trusted update",
+        source="Trusted",
+        tier="trusted",
+        published_at=datetime(2026, 7, 20, tzinfo=timezone.utc),
+    )
+    custom = NewsRecord(
+        canonical_url="https://custom.example/news",
+        title="Custom update",
+        source="Custom",
+        tier="custom",
+        published_at=datetime(2026, 7, 20, tzinfo=timezone.utc),
+    )
+    bundle = replace(report_bundle, news=(*report_bundle.news, trusted, custom))
+
+    daily = render_daily(date(2026, 7, 20), bundle)
+    weekly = render_weekly(date(2026, 7, 20), bundle)
+    official_section = weekly.split("## 本周重要官方更新", 1)[1].split("## 下周关注", 1)[0]
+
+    assert "Trusted update" in daily
+    assert "Custom update" in daily
+    assert "Codex update" in official_section
+    assert "Trusted update" not in official_section
+    assert "Custom update" not in official_section
+
+
+def test_report_links_keep_valid_http_urls_with_parentheses_clickable(report_bundle, repo_factory, score_factory) -> None:
+    item = (
+        repo_factory(url="https://example.com/tool_(software)"),
+        score_factory(),
+        ProjectSummary(one_line="带括号的链接", audience="开发者", why_now="正在升温", enhanced=False),
+    )
+
+    markdown = render_daily(date(2026, 7, 20), replace(report_bundle, new=(item,)))
+
+    assert "[acme/agent-skill](https://example.com/tool_\\(software\\))" in markdown
+
+
 def test_reports_escape_untrusted_markdown_and_unsafe_links(repo_factory, score_factory) -> None:
     item = (
         repo_factory(full_name="evil](javascript:alert(1))\n## injected", url="javascript:alert(1)"),
@@ -90,3 +145,39 @@ def test_write_report_atomic_overwrites_idempotently(tmp_path) -> None:
 
     assert path.read_text(encoding="utf-8") == "second"
     assert not path.with_suffix(".md.tmp").exists()
+
+
+def test_write_report_atomic_uses_unique_temp_files_for_each_write(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "report.md"
+    temporary_paths = []
+    original_replace = reporting.os.replace
+
+    def capture_replace(source, destination) -> None:
+        temporary_paths.append(Path(source))
+        original_replace(source, destination)
+
+    monkeypatch.setattr(reporting.os, "replace", capture_replace)
+
+    write_report_atomic(path, "first")
+    write_report_atomic(path, "second")
+
+    assert path.read_text(encoding="utf-8") == "second"
+    assert len(set(temporary_paths)) == 2
+    assert all(temporary_path.parent == path.parent for temporary_path in temporary_paths)
+
+
+def test_write_report_atomic_cleans_its_temp_file_when_replacement_fails(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "report.md"
+    temporary_paths = []
+
+    def fail_replace(source, destination) -> None:
+        temporary_paths.append(Path(source))
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(reporting.os, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="replace failed"):
+        write_report_atomic(path, "content")
+
+    assert len(temporary_paths) == 1
+    assert not temporary_paths[0].exists()
