@@ -131,7 +131,7 @@ def test_collect_keeps_repository_when_detail_payloads_are_malformed(radar_confi
     assert collection.repositories[0].latest_release is None
     assert collection.repositories[0].release_detail_valid is False
     assert collection.repositories[0].has_skill_md is True
-    assert collection.complete is True
+    assert collection.complete is False
     assert collection.statuses[-1].name == "github:optional-details"
     assert collection.statuses[-1].ok is False
 
@@ -155,6 +155,32 @@ def test_collect_marks_inventory_incomplete_when_all_quality_details_fail(
     assert collection.complete is False
     assert collection.statuses[-1].name == "github:optional-details"
     assert collection.statuses[-1].ok is False
+
+
+def test_collect_requires_explicit_results_for_every_optional_detail(
+    radar_config,
+) -> None:
+    fixture = Path(__file__).with_name("fixtures") / "github_search.json"
+    payload = json.loads(fixture.read_text(encoding="utf-8"))
+
+    def run_with_failure(failing_suffix: str):
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/search/repositories":
+                return httpx.Response(200, json=payload)
+            if request.url.path.endswith(failing_suffix):
+                return httpx.Response(503)
+            if request.url.path.endswith("/contents"):
+                return httpx.Response(200, json=[{"name": "main.py"}])
+            return httpx.Response(404)
+
+        return GitHubClient(
+            "token", httpx.Client(transport=httpx.MockTransport(handler))
+        ).collect(radar_config)
+
+    for suffix in ("/readme", "/releases/latest", "/contents"):
+        collection = run_with_failure(suffix)
+        assert collection.complete is False
+        assert collection.statuses[-1].name == "github:optional-details"
 
 
 def test_enrich_reads_readme_release_and_root_capabilities(repo_factory) -> None:
