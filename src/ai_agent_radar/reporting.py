@@ -108,8 +108,8 @@ def write_report_atomic(path: Path, markdown: str) -> None:
             prefix=f".{path.name}.",
             suffix=".tmp",
         ) as temporary_file:
-            temporary_file.write(markdown)
             temporary_path = Path(temporary_file.name)
+            temporary_file.write(markdown)
         os.replace(temporary_path, path)
     finally:
         if temporary_path is not None and temporary_path.exists():

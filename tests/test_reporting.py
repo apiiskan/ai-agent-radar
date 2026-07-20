@@ -181,3 +181,33 @@ def test_write_report_atomic_cleans_its_temp_file_when_replacement_fails(tmp_pat
 
     assert len(temporary_paths) == 1
     assert not temporary_paths[0].exists()
+
+
+@pytest.mark.parametrize("failure_stage", ("write", "close"))
+def test_write_report_atomic_cleans_its_temp_file_when_writing_or_closing_fails(
+    tmp_path, monkeypatch, failure_stage
+) -> None:
+    created_path = tmp_path / ".report.md.created.tmp"
+    created_path.write_text("partial", encoding="utf-8")
+
+    class FailingTemporaryFile:
+        name = str(created_path)
+
+        def __enter__(self):
+            return self
+
+        def write(self, content) -> None:
+            if failure_stage == "write":
+                raise OSError("write failed")
+
+        def __exit__(self, exc_type, exc_value, traceback) -> bool:
+            if failure_stage == "close":
+                raise OSError("close failed")
+            return False
+
+    monkeypatch.setattr(reporting.tempfile, "NamedTemporaryFile", lambda **kwargs: FailingTemporaryFile())
+
+    with pytest.raises(OSError, match=f"{failure_stage} failed"):
+        write_report_atomic(tmp_path / "report.md", "content")
+
+    assert not created_path.exists()
