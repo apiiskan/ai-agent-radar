@@ -27,3 +27,36 @@ and ranking resolves every score/star/name tie using repository ID.
 ## Concerns
 
 None.
+
+---
+
+## Follow-up Required-Findings Fix
+
+### RED
+
+- `.venv/bin/pytest tests/test_scoring.py -q` → `3 failed, 4 passed`: non-100 weights did not raise, negative
+  trend deltas raised from `log1p`, and the fallback reason did not describe actual evidence.
+- `.venv/bin/pytest tests/test_scoring.py -q` → `1 failed, 6 passed`: a new-release heat contribution had no
+  corresponding heat reason.
+
+### GREEN
+
+- `.venv/bin/pytest tests/test_scoring.py -q` → `7 passed in 0.01s`
+- `.venv/bin/ruff check src/ai_agent_radar/scoring.py tests/test_scoring.py` → `All checks passed!`
+- `.venv/bin/pytest -q` → `36 passed in 0.06s`
+- `git diff --check` → passed
+
+### Files
+
+- `src/ai_agent_radar/scoring.py`: validates 100-point weights, clamps logarithmic deltas, and emits truthful
+  heat, utility, freshness, and relevance evidence.
+- `tests/test_scoring.py`: covers invalid weights, all three negative deltas, no-evidence reasons, and release heat.
+
+### Self-review
+
+Each `log1p` input is clamped at zero; totals use only validated weights; every reason maps to observed data or a
+truthful absence/base-score statement; and the prior relevance/quality-gate fallback is removed.
+
+### Concerns
+
+None.
