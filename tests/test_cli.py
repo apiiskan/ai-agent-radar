@@ -12,6 +12,9 @@ from ai_agent_radar.models import RunResult, SourceStatus
 from ai_agent_radar.news import NewsCollection
 
 
+FIXED_CURRENT_TIME = datetime(2026, 7, 20, 1, tzinfo=timezone.utc)
+
+
 def test_cli_defaults_to_dry_run() -> None:
     args = build_parser().parse_args(["daily", "--date", "2026-07-20"])
 
@@ -109,7 +112,7 @@ def test_live_generation_rejects_non_current_dates_before_network_collection(
             str(config_path),
         ],
         {"GITHUB_TOKEN": "top-secret"},
-        now=lambda: datetime(2026, 7, 20, 1, tzinfo=timezone.utc),
+        now=lambda: FIXED_CURRENT_TIME,
     )
 
     assert exit_code == 2
@@ -224,6 +227,7 @@ def test_cli_reports_result_and_uses_source_health_for_exit_code(
             str(config_path),
         ],
         {"GITHUB_TOKEN": "top-secret"},
+        now=lambda: FIXED_CURRENT_TIME,
     )
 
     output = capsys.readouterr().out
@@ -300,6 +304,7 @@ def test_cli_returns_one_for_pipeline_failure_without_echoing_exception_secret(
             str(config_path),
         ],
         {"GITHUB_TOKEN": "top-secret"},
+        now=lambda: FIXED_CURRENT_TIME,
     )
 
     output = capsys.readouterr().out
@@ -423,6 +428,7 @@ def test_real_cli_pipeline_writes_degraded_report_when_all_sources_fail(
             str(config_path),
         ],
         {"GITHUB_TOKEN": "top-secret"},
+        now=lambda: FIXED_CURRENT_TIME,
     )
 
     payload = json.loads(capsys.readouterr().out)
@@ -468,6 +474,7 @@ def test_real_cli_pipeline_exits_zero_when_one_source_succeeds(
             str(config_path),
         ],
         {"GITHUB_TOKEN": "top-secret"},
+        now=lambda: FIXED_CURRENT_TIME,
     )
 
     payload = json.loads(capsys.readouterr().out)
