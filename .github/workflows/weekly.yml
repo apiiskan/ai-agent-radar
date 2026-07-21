@@ -1,0 +1,48 @@
+name: AI Agent Radar Weekly
+on:
+  schedule:
+    - cron: "30 0 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: write
+  issues: write
+concurrency:
+  group: ai-agent-radar-weekly
+  cancel-in-progress: true
+jobs:
+  radar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip}
+      - run: pip install .
+      - name: Generate weekly report
+        id: generate
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODEL_API_KEY: ${{ secrets.MODEL_API_KEY }}
+          MODEL_BASE_URL: ${{ vars.MODEL_BASE_URL }}
+          MODEL_NAME: ${{ vars.MODEL_NAME }}
+        run: |
+          set +e
+          ai-agent-radar weekly
+          status=$?
+          set -e
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+      - name: Commit generated data only
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data reports
+          git diff --cached --quiet || git commit -m "chore: update weekly radar"
+          git push
+      - name: Publish durable report
+        if: steps.generate.outputs.exit_code == '0'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ai-agent-radar publish weekly
+      - name: Propagate generation status
+        if: steps.generate.outputs.exit_code != '0'
+        run: exit ${{ steps.generate.outputs.exit_code }}

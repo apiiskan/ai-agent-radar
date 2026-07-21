@@ -1,1 +1,10 @@
 .worktrees/
+.superpowers/
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+.radar-cache/
+data/raw/

@@ -1,0 +1,22 @@
+timezone: Asia/Shanghai
+queries:
+  codex: ["codex agent skill", "codex automation agent"]
+  claude: ["claude code agent skill", "claude agent automation"]
+  grok: ["grok agent", "xai agent tool"]
+  kimi: ["kimi agent", "moonshot ai agent"]
+  general: ["agent skills SKILL.md", "MCP agent tools", "multi-agent framework", "computer-use agent"]
+feeds:
+  - {name: OpenAI News, url: "https://openai.com/news/rss.xml", tier: official, kind: rss}
+  - {name: Anthropic Releases, url: "https://api.github.com/repos/anthropics/claude-code/releases?per_page=30", tier: official, kind: github_releases}
+  - {name: xAI Releases, url: "https://api.github.com/repos/xai-org/xai-sdk-python/releases?per_page=30", tier: official, kind: github_releases}
+  - {name: Kimi Releases, url: "https://api.github.com/repos/MoonshotAI/kimi-cli/releases?per_page=30", tier: official, kind: github_releases}
+weights: {heat: 45, utility: 25, freshness: 20, relevance: 10}
+limits: {search_per_query: 30, daily_top: 10, weekly_top: 20}
+exclusions: {repositories: [], keywords: ["awesome list mirror", "SEO"]}
+quality:
+  recent_release_days: 90
+  fork_min_ahead_commits: 3
+  official_organizations: [openai, anthropics, xai-org, MoonshotAI]
+  trusted_topics: [agent, ai-agent, agent-skills, mcp, codex, claude-code]
+  allow_official_relevance_exception: true
+  keyword_stuffing_ratio: 0.45
