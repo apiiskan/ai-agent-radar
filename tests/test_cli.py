@@ -31,6 +31,46 @@ def test_publish_subcommand_is_explicit_and_targets_an_existing_report() -> None
     assert args.mode == "weekly"
 
 
+def test_telegram_test_command_requires_only_bot_token(monkeypatch, capsys) -> None:
+    calls: list[str] = []
+
+    class CapturingPublisher:
+        def __init__(self, token, chat_id, client) -> None:
+            assert token == "top-secret"
+            assert chat_id is None
+
+        def discover_private_start_chat(self) -> str:
+            calls.append("discover")
+            return "123456789"
+
+        def send_bootstrap_test(self, chat_id: str) -> int:
+            calls.append(chat_id)
+            return 91
+
+    monkeypatch.setattr(cli, "TelegramPublisher", CapturingPublisher)
+
+    exit_code = cli.main(["telegram-test"], {"TELEGRAM_BOT_TOKEN": "top-secret"})
+
+    assert exit_code == 0
+    assert calls == ["discover", "123456789"]
+    assert json.loads(capsys.readouterr().out) == {
+        "ok": True,
+        "kind": "telegram-test",
+        "message_id": 91,
+        "chat_id": "***6789",
+    }
+
+
+def test_telegram_test_missing_token_is_sanitized(capsys) -> None:
+    exit_code = cli.main(["telegram-test"], {})
+
+    assert exit_code == 2
+    assert json.loads(capsys.readouterr().out) == {
+        "ok": False,
+        "error": "TELEGRAM_BOT_TOKEN is required",
+    }
+
+
 @pytest.mark.parametrize(
     "url",
     [

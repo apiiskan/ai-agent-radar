@@ -17,6 +17,7 @@ from .news import collect_news
 from .pipeline import PipelineDependencies, run_pipeline
 from .publish import IssuePublisher
 from .summarize import Summarizer
+from .telegram import TelegramError, TelegramPublisher, mask_chat_id
 
 DEFAULT_MODEL_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_MODEL_NAME = "gpt-5-mini"
@@ -38,6 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     publish.add_argument("mode", choices=("daily", "weekly"))
     _add_common_arguments(publish)
     publish.set_defaults(publish=True)
+    commands.add_parser("telegram-test")
     return parser
 
 
@@ -79,6 +81,8 @@ def main(
 ) -> int:
     args = build_parser().parse_args(argv)
     environment = os.environ if environ is None else environ
+    if args.command == "telegram-test":
+        return _run_telegram_test(environment)
     token = environment.get("GITHUB_TOKEN")
     repository = environment.get("GITHUB_REPOSITORY")
     if args.publish and not repository:
@@ -156,6 +160,33 @@ def main(
         and any(status.ok for status in result.source_statuses)
         else 1
     )
+
+
+def _run_telegram_test(environment: Mapping[str, str]) -> int:
+    token = environment.get("TELEGRAM_BOT_TOKEN")
+    if not token:
+        _print_error("TELEGRAM_BOT_TOKEN is required")
+        return 2
+    try:
+        with httpx.Client(follow_redirects=False) as client:
+            publisher = TelegramPublisher(token, None, client)
+            chat_id = publisher.discover_private_start_chat()
+            message_id = publisher.send_bootstrap_test(chat_id)
+    except TelegramError as exc:
+        _print_error(str(exc))
+        return 1
+    print(
+        json.dumps(
+            {
+                "ok": True,
+                "kind": "telegram-test",
+                "message_id": message_id,
+                "chat_id": mask_chat_id(chat_id),
+            },
+            ensure_ascii=False,
+        )
+    )
+    return 0
 
 
 def _fetch_news(

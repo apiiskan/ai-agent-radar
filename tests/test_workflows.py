@@ -22,6 +22,31 @@ def test_daily_workflow_has_schedule_dispatch_permissions_and_concurrency() -> N
     assert workflow["concurrency"]["cancel-in-progress"] is True
 
 
+def test_daily_manual_telegram_test_is_isolated_from_report_generation() -> None:
+    workflow = load_workflow("daily")
+    dispatch = workflow[True]["workflow_dispatch"]
+    telegram_input = dispatch["inputs"]["telegram_test"]
+    telegram_job = workflow["jobs"]["telegram-test"]
+    radar_job = workflow["jobs"]["radar"]
+
+    assert telegram_input["type"] == "boolean"
+    assert telegram_input["default"] is False
+    assert telegram_job["if"] == (
+        "github.event_name == 'workflow_dispatch' && inputs.telegram_test"
+    )
+    assert radar_job["if"] == (
+        "github.event_name != 'workflow_dispatch' || !inputs.telegram_test"
+    )
+    command_step = next(
+        step
+        for step in telegram_job["steps"]
+        if step.get("run") == "ai-agent-radar telegram-test"
+    )
+    assert command_step["env"] == {
+        "TELEGRAM_BOT_TOKEN": "${{ secrets.TELEGRAM_BOT_TOKEN }}"
+    }
+
+
 def test_weekly_workflow_uses_monday_0030_utc() -> None:
     workflow = load_workflow("weekly")
     assert workflow[True]["schedule"][0]["cron"] == "30 0 * * 1"
