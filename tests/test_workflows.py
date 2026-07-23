@@ -92,6 +92,53 @@ def test_degraded_generation_is_committed_before_workflow_returns_nonzero() -> N
         assert "exit " in finish["run"]
 
 
+def test_daily_workflow_delivers_report_then_alerts_on_failure() -> None:
+    workflow = load_workflow("daily")
+    steps = workflow["jobs"]["radar"]["steps"]
+    publish = next(step for step in steps if step.get("name") == "Publish durable report")
+    notify_daily = next(
+        step for step in steps if step.get("name") == "Send Telegram daily report"
+    )
+    notify_failure = next(
+        step for step in steps if step.get("name") == "Send Telegram failure alert"
+    )
+    finish = next(step for step in steps if step.get("name") == "Propagate generation status")
+
+    assert steps.index(publish) < steps.index(notify_daily)
+    assert steps.index(notify_daily) < steps.index(notify_failure)
+    assert steps.index(notify_failure) < steps.index(finish)
+    assert notify_daily["if"] == (
+        "steps.generate.outputs.exit_code == '0' && success()"
+    )
+    assert notify_daily["run"] == "ai-agent-radar notify daily"
+    assert notify_failure["if"] == (
+        "always() && "
+        "(steps.generate.outputs.exit_code != '0' || failure())"
+    )
+    assert "ai-agent-radar notify failure" in notify_failure["run"]
+    assert "GENERATION_EXIT_CODE" in notify_failure["run"]
+    assert finish["if"] == (
+        "always() && steps.generate.outputs.exit_code != '0'"
+    )
+
+
+def test_daily_telegram_steps_receive_only_telegram_secrets() -> None:
+    steps = load_workflow("daily")["jobs"]["radar"]["steps"]
+    expected_environment = {
+        "TELEGRAM_BOT_TOKEN": "${{ secrets.TELEGRAM_BOT_TOKEN }}",
+        "TELEGRAM_CHAT_ID": "${{ secrets.TELEGRAM_CHAT_ID }}",
+    }
+    for name in ("Send Telegram daily report", "Send Telegram failure alert"):
+        step = next(step for step in steps if step.get("name") == name)
+        assert step["env"]["TELEGRAM_BOT_TOKEN"] == expected_environment[
+            "TELEGRAM_BOT_TOKEN"
+        ]
+        assert step["env"]["TELEGRAM_CHAT_ID"] == expected_environment[
+            "TELEGRAM_CHAT_ID"
+        ]
+        assert "GITHUB_TOKEN" not in step["env"]
+
+
 def test_daily_and_weekly_use_distinct_mode_specific_concurrency_groups() -> None:
     daily_group = load_workflow("daily")["concurrency"]["group"]
     weekly_group = load_workflow("weekly")["concurrency"]["group"]

@@ -62,6 +62,24 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ai-agent-radar publish daily
+      - name: Send Telegram daily report
+        if: steps.generate.outputs.exit_code == '0' && success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: ai-agent-radar notify daily
+      - name: Send Telegram failure alert
+        if: always() && (steps.generate.outputs.exit_code != '0' || failure())
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GENERATION_EXIT_CODE: ${{ steps.generate.outputs.exit_code }}
+        run: |
+          args=()
+          if [ -n "$GENERATION_EXIT_CODE" ]; then
+            args+=(--generation-exit-code "$GENERATION_EXIT_CODE")
+          fi
+          ai-agent-radar notify failure "${args[@]}"
       - name: Propagate generation status
-        if: steps.generate.outputs.exit_code != '0'
+        if: always() && steps.generate.outputs.exit_code != '0'
         run: exit ${{ steps.generate.outputs.exit_code }}
