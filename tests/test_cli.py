@@ -72,6 +72,138 @@ def test_telegram_test_missing_token_is_sanitized(capsys) -> None:
 
 
 @pytest.mark.parametrize(
+    ("missing", "message"),
+    [
+        ("TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT_TOKEN is required"),
+        ("TELEGRAM_CHAT_ID", "TELEGRAM_CHAT_ID is required"),
+        ("GITHUB_REPOSITORY", "GITHUB_REPOSITORY is required"),
+    ],
+)
+def test_notify_requires_all_delivery_configuration(
+    missing, message, tmp_path, config_path, capsys
+) -> None:
+    environment = {
+        "TELEGRAM_BOT_TOKEN": "bot-secret",
+        "TELEGRAM_CHAT_ID": "123456789",
+        "GITHUB_REPOSITORY": "o/r",
+    }
+    environment.pop(missing)
+
+    exit_code = cli.main(
+        [
+            "notify",
+            "daily",
+            "--date",
+            "2026-07-20",
+            "--root",
+            str(tmp_path),
+            "--config",
+            str(config_path),
+        ],
+        environment,
+        now=lambda: FIXED_CURRENT_TIME,
+    )
+
+    assert exit_code == 2
+    assert json.loads(capsys.readouterr().out) == {
+        "ok": False,
+        "error": message,
+    }
+
+
+def test_notify_daily_prints_only_non_sensitive_result(
+    tmp_path, config_path, monkeypatch, capsys
+) -> None:
+    expected = {
+        "kind": "daily",
+        "message_id": 42,
+        "report_path": "reports/daily/2026-07-20.md",
+        "report_url": "https://github.com/o/r/blob/main/reports/daily/2026-07-20.md",
+    }
+    captured: dict[str, object] = {}
+
+    def fake_send(day, root, repository, publisher):
+        captured.update(day=day, root=root, repository=repository)
+        return expected
+
+    monkeypatch.setattr(cli, "send_daily_notification", fake_send)
+
+    exit_code = cli.main(
+        [
+            "notify",
+            "daily",
+            "--date",
+            "2026-07-20",
+            "--root",
+            str(tmp_path),
+            "--config",
+            str(config_path),
+        ],
+        {
+            "TELEGRAM_BOT_TOKEN": "bot-secret",
+            "TELEGRAM_CHAT_ID": "123456789",
+            "GITHUB_REPOSITORY": "o/r",
+        },
+        now=lambda: FIXED_CURRENT_TIME,
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert json.loads(output) == expected
+    assert "bot-secret" not in output
+    assert "123456789" not in output
+    assert captured == {
+        "day": date(2026, 7, 20),
+        "root": tmp_path.resolve(),
+        "repository": "o/r",
+    }
+
+
+def test_notify_failure_sends_sanitized_alert(monkeypatch, capsys) -> None:
+    alerts: list[str] = []
+
+    class CapturingPublisher:
+        def __init__(self, token, chat_id, client) -> None:
+            assert token == "bot-secret"
+            assert chat_id == "123456789"
+
+        def send_alert(self, text: str) -> int:
+            alerts.append(text)
+            return 55
+
+    monkeypatch.setattr(cli, "TelegramPublisher", CapturingPublisher)
+
+    exit_code = cli.main(
+        ["notify", "failure", "--generation-exit-code", "7"],
+        {
+            "TELEGRAM_BOT_TOKEN": "bot-secret",
+            "TELEGRAM_CHAT_ID": "123456789",
+            "GITHUB_REPOSITORY": "o/r",
+            "GITHUB_WORKFLOW": "Daily",
+            "GITHUB_RUN_ID": "999",
+            "GITHUB_SERVER_URL": "https://github.com",
+            "UNTRUSTED_EXCEPTION": "secret report body",
+        },
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert json.loads(output) == {
+        "kind": "failure",
+        "message_id": 55,
+    }
+    assert alerts == [
+        "⚠️ AI Agent Radar 日报运行失败\n"
+        "仓库: o/r\n"
+        "工作流: Daily\n"
+        "生成退出码: 7\n"
+        "运行: https://github.com/o/r/actions/runs/999"
+    ]
+    assert "bot-secret" not in output
+    assert "123456789" not in output
+
+
+@pytest.mark.parametrize(
     "url",
     [
         "https://api.github.com/repos/anthropics/claude-code/releases",

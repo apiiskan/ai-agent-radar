@@ -14,6 +14,11 @@ import httpx
 from .config import ConfigurationError, load_config
 from .github import GitHubClient
 from .news import collect_news
+from .notifications import (
+    NotificationError,
+    send_daily_notification,
+    send_failure_notification,
+)
 from .pipeline import PipelineDependencies, run_pipeline
 from .publish import IssuePublisher
 from .summarize import Summarizer
@@ -40,6 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common_arguments(publish)
     publish.set_defaults(publish=True)
     commands.add_parser("telegram-test")
+    notify = commands.add_parser("notify")
+    notification_kinds = notify.add_subparsers(dest="notify_kind", required=True)
+    notify_daily = notification_kinds.add_parser("daily")
+    _add_common_arguments(notify_daily)
+    notify_failure = notification_kinds.add_parser("failure")
+    notify_failure.add_argument("--generation-exit-code", type=int)
     return parser
 
 
@@ -83,6 +94,8 @@ def main(
     environment = os.environ if environ is None else environ
     if args.command == "telegram-test":
         return _run_telegram_test(environment)
+    if args.command == "notify":
+        return _run_notification(args, environment, now)
     token = environment.get("GITHUB_TOKEN")
     repository = environment.get("GITHUB_REPOSITORY")
     if args.publish and not repository:
@@ -186,6 +199,58 @@ def _run_telegram_test(environment: Mapping[str, str]) -> int:
             ensure_ascii=False,
         )
     )
+    return 0
+
+
+def _run_notification(
+    args: argparse.Namespace,
+    environment: Mapping[str, str],
+    now: Callable[[], datetime] | None,
+) -> int:
+    required = (
+        "TELEGRAM_BOT_TOKEN",
+        "TELEGRAM_CHAT_ID",
+        "GITHUB_REPOSITORY",
+    )
+    for name in required:
+        if not environment.get(name):
+            _print_error(f"{name} is required")
+            return 2
+    token = environment["TELEGRAM_BOT_TOKEN"]
+    chat_id = environment["TELEGRAM_CHAT_ID"]
+    repository = environment["GITHUB_REPOSITORY"]
+    try:
+        with httpx.Client(follow_redirects=False) as client:
+            publisher = TelegramPublisher(token, chat_id, client)
+            if args.notify_kind == "failure":
+                result = send_failure_notification(
+                    environment,
+                    args.generation_exit_code,
+                    publisher,
+                )
+            else:
+                root = args.root.resolve()
+                config_path = (
+                    args.config if args.config.is_absolute() else root / args.config
+                )
+                config = load_config(config_path)
+                current_time = now() if now is not None else datetime.now(timezone.utc)
+                if current_time.tzinfo is None:
+                    current_time = current_time.replace(tzinfo=timezone.utc)
+                day = args.date or current_time.astimezone(
+                    ZoneInfo(config.timezone)
+                ).date()
+                result = send_daily_notification(day, root, repository, publisher)
+    except (ConfigurationError, NotificationError) as exc:
+        _print_error(str(exc))
+        return 2
+    except TelegramError as exc:
+        _print_error(str(exc))
+        return 1
+    except Exception:
+        _print_error("notification failed")
+        return 1
+    print(json.dumps(result, ensure_ascii=False))
     return 0
 
 
