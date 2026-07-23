@@ -2,8 +2,16 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 import httpx
+
+MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
+MAX_CAPTION_LENGTH = 1024
+MAX_ALERT_LENGTH = 4096
+MAX_ATTEMPTS = 3
+MAX_RETRY_DELAY = 60
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 class TelegramError(RuntimeError):
@@ -61,12 +69,31 @@ class TelegramPublisher:
         return candidates.pop()
 
     def send_alert(self, text: str, *, chat_id: str | None = None) -> int:
+        if len(text) > MAX_ALERT_LENGTH:
+            raise TelegramError("Telegram alert exceeds 4096 characters")
         destination = chat_id or self._chat_id
         if not destination:
             raise TelegramError("Telegram chat ID is required")
         payload = self._request(
             "sendMessage",
             json={"chat_id": destination, "text": text},
+        )
+        return _message_id(payload)
+
+    def send_document(self, path: Path, caption: str) -> int:
+        if len(caption) > MAX_CAPTION_LENGTH:
+            raise TelegramError("Telegram caption exceeds 1024 characters")
+        if not path.is_file():
+            raise TelegramError("Telegram report file does not exist")
+        if path.stat().st_size > MAX_DOCUMENT_BYTES:
+            raise TelegramError("Telegram report exceeds the 50 MB limit")
+        if not self._chat_id:
+            raise TelegramError("Telegram chat ID is required")
+        content = path.read_bytes()
+        payload = self._request(
+            "sendDocument",
+            data={"chat_id": self._chat_id, "caption": caption},
+            files={"document": (path.name, content, "text/markdown")},
         )
         return _message_id(payload)
 
@@ -81,23 +108,34 @@ class TelegramPublisher:
 
     def _request(self, method: str, **kwargs: object) -> dict:
         url = f"https://api.telegram.org/bot{self._token}/{method}"
-        try:
-            response = self._client.post(url, timeout=20, **kwargs)
-        except httpx.HTTPError as exc:
-            raise TelegramError("Telegram API request failed") from exc
-        if response.status_code >= 400:
-            raise TelegramError(
-                f"Telegram API request failed (HTTP {response.status_code})"
-            )
-        try:
-            payload = response.json()
-        except ValueError as exc:
-            raise TelegramError("Telegram API returned invalid JSON") from exc
-        if not isinstance(payload, dict) or payload.get("ok") is not True:
-            raise TelegramError("Telegram API rejected the request")
-        if not isinstance(payload.get("result"), (dict, list)):
-            raise TelegramError("Telegram API returned an invalid result")
-        return payload
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            try:
+                response = self._client.post(url, timeout=20, **kwargs)
+            except httpx.RequestError as exc:
+                if attempt == MAX_ATTEMPTS:
+                    raise TelegramError(
+                        "Telegram API request failed after 3 attempts"
+                    ) from exc
+                self._sleep(min(2 ** (attempt - 1), MAX_RETRY_DELAY))
+                continue
+
+            payload = _response_payload(response)
+            if (
+                response.status_code in RETRYABLE_STATUS_CODES
+                and attempt < MAX_ATTEMPTS
+            ):
+                self._sleep(_retry_delay(response.status_code, payload, attempt))
+                continue
+            if response.status_code >= 400:
+                raise TelegramError(
+                    f"Telegram API request failed (HTTP {response.status_code})"
+                )
+            if payload.get("ok") is not True:
+                raise TelegramError("Telegram API rejected the request")
+            if not isinstance(payload.get("result"), (dict, list)):
+                raise TelegramError("Telegram API returned an invalid result")
+            return payload
+        raise TelegramError("Telegram API request failed after 3 attempts")
 
 
 def _is_start_command(text: str) -> bool:
@@ -110,3 +148,23 @@ def _message_id(payload: dict) -> int:
     if not isinstance(result, dict) or not isinstance(result.get("message_id"), int):
         raise TelegramError("Telegram API returned an invalid message")
     return result["message_id"]
+
+
+def _response_payload(response: httpx.Response) -> dict:
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise TelegramError("Telegram API returned invalid JSON") from exc
+    if not isinstance(payload, dict):
+        raise TelegramError("Telegram API returned invalid JSON")
+    return payload
+
+
+def _retry_delay(status_code: int, payload: dict, attempt: int) -> float:
+    if status_code == 429:
+        parameters = payload.get("parameters")
+        if isinstance(parameters, dict):
+            retry_after = parameters.get("retry_after")
+            if isinstance(retry_after, (int, float)) and retry_after >= 0:
+                return min(float(retry_after), MAX_RETRY_DELAY)
+    return min(float(2 ** (attempt - 1)), MAX_RETRY_DELAY)
