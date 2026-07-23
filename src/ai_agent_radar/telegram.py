@@ -68,6 +68,13 @@ class TelegramPublisher:
             )
         return candidates.pop()
 
+    def get_bot_username(self) -> str:
+        payload = self._request("getMe")
+        result = payload["result"]
+        if not isinstance(result, dict) or not isinstance(result.get("username"), str):
+            raise TelegramError("Telegram API returned an invalid bot profile")
+        return result["username"]
+
     def send_alert(self, text: str, *, chat_id: str | None = None) -> int:
         if len(text) > MAX_ALERT_LENGTH:
             raise TelegramError("Telegram alert exceeds 4096 characters")

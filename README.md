@@ -43,6 +43,37 @@ GITHUB_TOKEN=your_write_token GITHUB_REPOSITORY=owner/repo \
 
 日报 cron 为 UTC `0 0 * * *`，对应北京时间每天 08:00；周榜 cron 为 UTC `30 0 * * 1`，对应北京时间每周一 08:30。可在 Actions 页面选择对应工作流并点击 **Run workflow** 手动运行。每个工作流都会先生成报告，把 `data/` 和 `reports/` 的变更提交并推送，然后才更新 Issue；降级运行会先持久化状态，再以非零状态结束且不发布 Issue。
 
+## Telegram 日报
+
+日报成功生成并发布 GitHub Issue 后，会向一个 Telegram 私聊发送完整的
+`reports/daily/YYYY-MM-DD.md` 附件、摘要和 GitHub 报告链接。生成或此前工作流
+步骤失败时只发送简短告警，不附带报告内容。周榜暂不发送 Telegram。
+
+在 BotFather 创建 Bot 后，先打开该 Bot 的私聊并发送 `/start`。推荐在本地运行
+安全配置脚本；Token 使用隐藏输入，两个值通过 stdin 写入 GitHub Actions
+Secrets，不会保存到文件或显示在命令参数中：
+
+```bash
+.venv/bin/python scripts/configure_telegram.py \
+  --repo apiiskan/ai-agent-radar
+```
+
+脚本会设置：
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+
+如果 Token 已经单独设置但不知道 chat ID，可在 Actions 页面手动运行
+`AI Agent Radar Daily`，勾选 `telegram_test`。测试只发送一条私聊消息，不运行
+日报；消息内会显示完整 `TELEGRAM_CHAT_ID`，Actions 日志只显示掩码。随后把该
+数字添加为同名 Repository Secret。
+
+完成配置后，手动运行一次未勾选 `telegram_test` 的日报工作流。Telegram 应收到
+一个以当天日期命名的 Markdown 文件；下载后可与仓库中的日报逐字节比较。若未
+收到消息，先在 Actions 日志确认是生成、Issue 发布还是 Telegram 步骤失败，再
+确认 Bot 未被停用、两个 Secrets 名称正确，并重新向 Bot 发送 `/start`。若
+`getUpdates` 报告 webhook 冲突，需要先移除该 Bot 的 webhook 再运行配置脚本。
+
 ## 评分
 
 综合分 = 45% 热度增长 + 25% 实用性 + 20% 新鲜度 + 10% 主题相关性。模型不会修改该分数。

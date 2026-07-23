@@ -284,3 +284,24 @@ def test_telegram_rejects_ok_false_response_without_leaking_description() -> Non
             publisher.send_alert("report body")
 
     assert str(error.value) == "Telegram API rejected the request"
+
+
+def test_get_bot_username_validates_token_without_returning_other_profile_data() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/getMe")
+        return httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "result": {
+                    "id": 123,
+                    "is_bot": True,
+                    "first_name": "Radar",
+                    "username": "agent_radar_bot",
+                },
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        publisher = TelegramPublisher("bot-token", None, client)
+        assert publisher.get_bot_username() == "agent_radar_bot"
