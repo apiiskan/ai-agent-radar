@@ -45,9 +45,11 @@ GITHUB_TOKEN=your_write_token GITHUB_REPOSITORY=owner/repo \
 
 ## Telegram 日报
 
-日报成功生成并发布 GitHub Issue 后，会向一个 Telegram 私聊发送完整的
-`reports/daily/YYYY-MM-DD.md` 附件、摘要和 GitHub 报告链接。生成或此前工作流
-步骤失败时只发送简短告警，不附带报告内容。周榜暂不发送 Telegram。
+日报成功生成并发布 GitHub Issue 后，会向一个 Telegram 私聊发送一条纯文本消息，
+直接展示 `增长最快 Top 10`：排名、仓库名、综合分、近 1 日/7 日 Star 增长和项目
+链接。消息末尾附完整日报链接，完整 Markdown 日报继续保留在 GitHub，不再作为
+Telegram 附件发送。生成或此前工作流步骤失败时只发送简短告警，不附带报告内容。
+周榜暂不发送 Telegram。
 
 在 BotFather 创建 Bot 后，先打开该 Bot 的私聊并发送 `/start`。推荐在本地运行
 安全配置脚本；Token 使用隐藏输入，两个值通过 stdin 写入 GitHub Actions
@@ -69,10 +71,11 @@ Secrets，不会保存到文件或显示在命令参数中：
 数字添加为同名 Repository Secret。
 
 完成配置后，手动运行一次未勾选 `telegram_test` 的日报工作流。Telegram 应收到
-一个以当天日期命名的 Markdown 文件；下载后可与仓库中的日报逐字节比较。若未
-收到消息，先在 Actions 日志确认是生成、Issue 发布还是 Telegram 步骤失败，再
-确认 Bot 未被停用、两个 Secrets 名称正确，并重新向 Bot 发送 `/start`。若
-`getUpdates` 报告 webhook 冲突，需要先移除该 Bot 的 webhook 再运行配置脚本。
+一条 `增长最快 Top 10` 文本消息，最多包含日报同名章节中的前 10 个项目，并可
+通过末尾链接打开 GitHub 完整日报。若未收到消息，先在 Actions 日志确认是生成、
+Issue 发布还是 Telegram 步骤失败，再确认 Bot 未被停用、两个 Secrets 名称正确，
+并重新向 Bot 发送 `/start`。若 `getUpdates` 报告 webhook 冲突，需要先移除该
+Bot 的 webhook 再运行配置脚本。
 
 ## 评分
 

@@ -97,7 +97,7 @@ def test_daily_workflow_delivers_report_then_alerts_on_failure() -> None:
     steps = workflow["jobs"]["radar"]["steps"]
     publish = next(step for step in steps if step.get("name") == "Publish durable report")
     notify_daily = next(
-        step for step in steps if step.get("name") == "Send Telegram daily report"
+        step for step in steps if step.get("name") == "Send Telegram growth Top 10"
     )
     notify_failure = next(
         step for step in steps if step.get("name") == "Send Telegram failure alert"
@@ -128,7 +128,7 @@ def test_daily_telegram_steps_receive_only_telegram_secrets() -> None:
         "TELEGRAM_BOT_TOKEN": "${{ secrets.TELEGRAM_BOT_TOKEN }}",
         "TELEGRAM_CHAT_ID": "${{ secrets.TELEGRAM_CHAT_ID }}",
     }
-    for name in ("Send Telegram daily report", "Send Telegram failure alert"):
+    for name in ("Send Telegram growth Top 10", "Send Telegram failure alert"):
         step = next(step for step in steps if step.get("name") == name)
         assert step["env"]["TELEGRAM_BOT_TOKEN"] == expected_environment[
             "TELEGRAM_BOT_TOKEN"

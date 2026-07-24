@@ -125,3 +125,7 @@ def test_readme_documents_telegram_setup_verification_and_recovery() -> None:
     assert "/start" in readme
     assert "telegram_test" in readme
     assert "Telegram" in readme
+    assert "增长最快 Top 10" in readme
+    assert "一条纯文本消息" in readme
+    assert "完整 Markdown 日报继续保留在 GitHub" in readme
+    assert "发送完整的\n`reports/daily" not in readme

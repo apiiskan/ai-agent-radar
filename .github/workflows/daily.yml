@@ -62,7 +62,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ai-agent-radar publish daily
-      - name: Send Telegram daily report
+      - name: Send Telegram growth Top 10
         if: steps.generate.outputs.exit_code == '0' && success()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
