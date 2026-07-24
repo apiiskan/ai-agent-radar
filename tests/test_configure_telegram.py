@@ -129,3 +129,7 @@ def test_readme_documents_telegram_setup_verification_and_recovery() -> None:
     assert "一条纯文本消息" in readme
     assert "完整 Markdown 日报继续保留在 GitHub" in readme
     assert "发送完整的\n`reports/daily" not in readme
+    assert "中文功能介绍" in readme
+    assert "模型摘要优先" in readme
+    assert "中文规则兜底" in readme
+    assert "Telegram 阶段不会再次调用模型" in readme

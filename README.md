@@ -51,6 +51,11 @@ GITHUB_TOKEN=your_write_token GITHUB_REPOSITORY=owner/repo \
 Telegram 附件发送。生成或此前工作流步骤失败时只发送简短告警，不附带报告内容。
 周榜暂不发送 Telegram。
 
+每个项目同时展示一句不超过 50 字的中文功能介绍：模型摘要优先，模型密钥缺失或
+调用失败时使用基于 Skill、MCP、安全、可观测性、编排和自动化特征的中文规则兜底。
+Telegram 阶段不会再次调用模型，只复用已经写入日报的摘要，因此不会增加额外模型
+请求或 Telegram 专用密钥。
+
 在 BotFather 创建 Bot 后，先打开该 Bot 的私聊并发送 `/start`。推荐在本地运行
 安全配置脚本；Token 使用隐藏输入，两个值通过 stdin 写入 GitHub Actions
 Secrets，不会保存到文件或显示在命令参数中：
