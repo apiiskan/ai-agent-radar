@@ -36,6 +36,7 @@ Successful delivery sends exactly one plain-text Telegram message:
 🔥 AI Agent Radar · 增长最快 Top 10 · 2026-07-24
 
 1. owner/repository
+功能：用于构建和编排 AI Agent 及多智能体工作流。
 综合分 84.23 · 1日 +54★ · 7日 +123★
 https://github.com/owner/repository
 
@@ -49,14 +50,46 @@ Each entry contains:
 
 - rank;
 - repository full name;
+- a concise Chinese feature introduction capped at 50 characters;
 - composite score;
 - one-day Star growth;
 - seven-day Star growth;
 - original GitHub repository URL.
 
 Missing one-day or seven-day Star growth is displayed as `暂无数据`; zero is
-displayed as `+0★`. Repository descriptions and scoring explanations are not
-included.
+displayed as `+0★`. Scoring explanations are not included.
+
+The feature introduction reuses the `ProjectSummary.one_line` already written
+into the durable report. Telegram delivery does not make another model call.
+Markdown escape characters are removed before display, surrounding whitespace
+is normalized, and the introduction is capped at 50 characters without
+truncating the repository name or URL.
+
+### Chinese summary guarantee
+
+The existing report-generation summarizer remains model-first:
+
+- When `MODEL_API_KEY` is configured and the model succeeds, use its concise
+  Chinese `one_line` summary.
+- When the model is unavailable, fails, or returns invalid data, generate a
+  deterministic Chinese feature introduction from repository metadata.
+
+The deterministic fallback selects one specific Chinese template in priority
+order:
+
+1. preserve an existing Chinese repository description, capped at 50
+   characters;
+2. Agent Skill plus MCP integration;
+3. Agent Skill;
+4. MCP integration;
+5. security or guardrail tooling;
+6. observability or monitoring;
+7. multi-agent orchestration or agent framework;
+8. automation or developer tooling;
+9. a generic AI Agent open-source tool description.
+
+The fallback never sends the original English description to Telegram. It does
+not translate with an external service or add a new Secret.
 
 No Telegram parse mode is used. The message is plain text, so repository names
 and URLs cannot cause Telegram formatting errors.
@@ -69,27 +102,29 @@ Markdown report and:
 1. locates the exact `## 增长最快` heading;
 2. stops at the next level-two heading;
 3. accepts ordered-list entries whose first line contains a Markdown GitHub
-   repository link;
+   repository link followed by the report summary after `—`;
 4. reads the immediately following indented scoring line;
-5. extracts `综合分`, `近 1 日新增 N stars`, and `7 日新增 N stars`;
+5. extracts and unescapes the feature introduction, `综合分`,
+   `近 1 日新增 N stars`, and `7 日新增 N stars`;
 6. keeps the existing order and returns at most ten entries.
 
-The parser does not execute Markdown, follow links, or infer data from project
-descriptions. Malformed entries are skipped. A fully empty parsed ranking is a
-local notification error.
+The parser does not execute Markdown or follow links. Malformed entries are
+skipped. A fully empty parsed ranking is a local notification error.
 
 ## Length Handling
 
 The Bot API `sendMessage` limit is 4096 characters. The renderer reserves space
 for the title and complete-report URL, then adds entries in order.
 
-The compact required fields are expected to fit for ten normal GitHub
-repository names and URLs. If the rendered message would exceed 4096
-characters:
+The feature introduction is capped at 50 characters before rendering. The
+compact required fields are expected to fit for ten normal GitHub repository
+names and URLs. If the rendered message would exceed 4096 characters:
 
 1. omit one-day and seven-day growth labels that are `暂无数据`;
-2. if still too long, stop before the first entry that would exceed the limit;
-3. state the actual number sent in the title.
+2. reduce feature introductions to 30 characters, preserving whole Unicode
+   code points and adding `…`;
+3. if still too long, stop before the first entry that would exceed the limit;
+4. state the actual number sent in the title.
 
 The renderer never truncates a repository name or URL and never splits the
 ranking across multiple Telegram messages.
@@ -110,6 +145,14 @@ Replace the successful daily document upload in
 
 The non-sensitive CLI result retains `kind`, `message_id`, `report_path`, and
 `report_url`.
+
+### Summarizer fallback
+
+Update `Summarizer._fallback` so `ProjectSummary.one_line` is always Chinese.
+The helper inspects the repository description, `has_skill_md`, `has_mcp`,
+topics, and repository text using deterministic case-insensitive keyword
+groups. Existing `audience`, `why_now`, enhanced-model behavior, and scoring
+remain unchanged.
 
 ### Telegram publisher
 
@@ -149,6 +192,13 @@ Add deterministic tests for:
 - preserving report order without re-ranking;
 - ignoring other report sections;
 - score, one-day Star growth, and seven-day Star growth extraction;
+- feature-introduction extraction and Markdown unescaping;
+- 50-character feature-introduction bound;
+- model-generated Chinese summary reuse without an extra Telegram model call;
+- deterministic Chinese fallback for Chinese descriptions, Skill plus MCP,
+  Skill, MCP, security, observability, orchestration, automation, and generic
+  projects;
+- no raw English description in fallback output;
 - `暂无数据` and `+0★` rendering;
 - one-to-nine-entry success with the actual count;
 - missing and empty section failures;
@@ -167,8 +217,12 @@ No automated test contacts Telegram.
 - Each successful daily run sends exactly one Telegram text message.
 - The message contains at most the first ten valid projects from
   `## 增长最快`, in the same order as the report.
-- Each displayed project contains its rank, repository, composite score,
-  available one-day and seven-day Star growth, and GitHub URL.
+- Each displayed project contains its rank, repository, concise Chinese
+  feature introduction, composite score, available one-day and seven-day Star
+  growth, and GitHub URL.
+- Telegram delivery makes no model request; it reuses the durable report.
+- Model failure or absence still produces a deterministic Chinese feature
+  introduction and never exposes the original English fallback description.
 - The message contains a working link to the complete report on `main`.
 - The message never exceeds 4096 characters and never truncates a repository
   name or URL.
