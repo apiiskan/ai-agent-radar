@@ -13,8 +13,9 @@ _ENTRY_RE = re.compile(
     r"^(?P<rank>\d+)\. "
     r"\[(?P<repository>[^\]]+)\]"
     r"\((?P<url>https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)\)"
-    r"(?:\s+—.*)?$"
+    r"\s+—\s+(?P<introduction>.+)$"
 )
+_MARKDOWN_ESCAPE_RE = re.compile(r"\\([\\`*_{}\[\]<>()#+.!|])")
 _SCORE_RE = re.compile(r"综合分 `(?P<score>[0-9]+(?:\.[0-9]+)?)`")
 _STARS_1D_RE = re.compile(r"近 1 日新增 (?P<count>\d+) stars")
 _STARS_7D_RE = re.compile(r"7 日新增 (?P<count>\d+) stars")
@@ -28,6 +29,7 @@ class NotificationError(RuntimeError):
 class GrowthEntry:
     rank: int
     repository: str
+    introduction: str
     score: str
     stars_1d: int | None
     stars_7d: int | None
@@ -63,12 +65,16 @@ def extract_growth_top(markdown: str, limit: int = 10) -> tuple[GrowthEntry, ...
         score_match = _SCORE_RE.search(details)
         if not score_match:
             continue
+        introduction = _plain_introduction(entry_match.group("introduction"))
+        if not introduction:
+            continue
         stars_1d_match = _STARS_1D_RE.search(details)
         stars_7d_match = _STARS_7D_RE.search(details)
         entries.append(
             GrowthEntry(
                 rank=int(entry_match.group("rank")),
                 repository=entry_match.group("repository"),
+                introduction=introduction,
                 score=score_match.group("score"),
                 stars_1d=(
                     int(stars_1d_match.group("count"))
@@ -98,7 +104,13 @@ def render_growth_message(
     candidates = tuple(entries[:10])
     if not candidates:
         raise NotificationError("growth ranking is empty")
-    message = _compose_growth_message(day, candidates, report_url, omit_missing=False)
+    message = _compose_growth_message(
+        day,
+        candidates,
+        report_url,
+        omit_missing=False,
+        introduction_limit=50,
+    )
     if len(message) <= MAX_TELEGRAM_MESSAGE_LENGTH:
         return message
 
@@ -110,6 +122,7 @@ def render_growth_message(
             trial,
             report_url,
             omit_missing=True,
+            introduction_limit=30,
         )
         if len(message) > MAX_TELEGRAM_MESSAGE_LENGTH:
             break
@@ -121,6 +134,7 @@ def render_growth_message(
         tuple(selected),
         report_url,
         omit_missing=True,
+        introduction_limit=30,
     )
 
 
@@ -194,12 +208,17 @@ def _compose_growth_message(
     report_url: str,
     *,
     omit_missing: bool,
+    introduction_limit: int,
 ) -> str:
     title = (
         f"🔥 AI Agent Radar · 增长最快 Top {len(entries)} · {day.isoformat()}"
     )
     blocks = [
-        _growth_entry_block(entry, omit_missing=omit_missing)
+        _growth_entry_block(
+            entry,
+            omit_missing=omit_missing,
+            introduction_limit=introduction_limit,
+        )
         for entry in entries
     ]
     return (
@@ -209,7 +228,12 @@ def _compose_growth_message(
     )
 
 
-def _growth_entry_block(entry: GrowthEntry, *, omit_missing: bool) -> str:
+def _growth_entry_block(
+    entry: GrowthEntry,
+    *,
+    omit_missing: bool,
+    introduction_limit: int,
+) -> str:
     metrics = [f"综合分 {entry.score}"]
     for label, value in (("1日", entry.stars_1d), ("7日", entry.stars_7d)):
         if value is None and omit_missing:
@@ -218,6 +242,21 @@ def _growth_entry_block(entry: GrowthEntry, *, omit_missing: bool) -> str:
         metrics.append(f"{label} {growth}")
     return (
         f"{entry.rank}. {entry.repository}\n"
+        f"功能：{_bounded_text(entry.introduction, introduction_limit)}\n"
         + " · ".join(metrics)
         + f"\n{entry.url}"
     )
+
+
+def _plain_introduction(markdown_text: str) -> str:
+    return _bounded_text(
+        _MARKDOWN_ESCAPE_RE.sub(r"\1", markdown_text),
+        50,
+    )
+
+
+def _bounded_text(text: str, limit: int) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 1] + "…"

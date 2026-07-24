@@ -41,7 +41,8 @@ def growth_report(count: int, *, include_other_sections: bool = True) -> str:
         seven_day = 123 if rank == 1 else rank * 2
         entries.append(
             f"{rank}. [owner/repo-{rank}]"
-            f"(https://github.com/owner/repo-{rank}) — description\n"
+            f"(https://github.com/owner/repo-{rank}) "
+            "— 用于编排 Agent \\(支持 MCP\\)\\.\n"
             f"   综合分 `84.{rank:02d}`；热度：近 1 日新增 {one_day} stars；"
             f"热度：7 日新增 {seven_day} stars；实用性：包含 README"
         )
@@ -63,6 +64,7 @@ def test_extract_growth_top_preserves_order_ignores_other_sections_and_limits_to
     assert entries[0] == GrowthEntry(
         rank=1,
         repository="owner/repo-1",
+        introduction="用于编排 Agent (支持 MCP).",
         score="84.01",
         stars_1d=54,
         stars_7d=123,
@@ -79,7 +81,7 @@ def test_extract_growth_top_skips_malformed_entries_and_keeps_missing_growth() -
 
 1. malformed entry
    综合分 `99`；热度：近 1 日新增 99 stars
-2. [owner/valid](https://github.com/owner/valid) — description
+2. [owner/valid](https://github.com/owner/valid) — 提供智能体工作流能力。
    综合分 `72.5`；实用性：包含 README
 3. [not-github/repo](https://example.com/repo)
    综合分 `70`
@@ -91,6 +93,7 @@ def test_extract_growth_top_skips_malformed_entries_and_keeps_missing_growth() -
         GrowthEntry(
             rank=2,
             repository="owner/valid",
+            introduction="提供智能体工作流能力。",
             score="72.5",
             stars_1d=None,
             stars_7d=None,
@@ -111,11 +114,26 @@ def test_extract_growth_top_rejects_missing_or_empty_valid_section(markdown) -> 
         extract_growth_top(markdown)
 
 
+def test_extract_growth_top_caps_feature_introduction_at_fifty_characters() -> None:
+    markdown = (
+        "# report\n\n## 增长最快\n\n"
+        "1. [owner/repo](https://github.com/owner/repo) — "
+        + "功能" * 40
+        + "\n   综合分 `80`\n\n## 最实用\n"
+    )
+
+    introduction = extract_growth_top(markdown)[0].introduction
+
+    assert len(introduction) == 50
+    assert introduction.endswith("…")
+
+
 def test_render_growth_message_formats_missing_and_zero_growth() -> None:
     entries = (
         GrowthEntry(
             rank=1,
             repository="owner/repo",
+            introduction="用于构建和编排 AI Agent 工作流。",
             score="84.23",
             stars_1d=0,
             stars_7d=None,
@@ -132,6 +150,7 @@ def test_render_growth_message_formats_missing_and_zero_growth() -> None:
     assert message == (
         "🔥 AI Agent Radar · 增长最快 Top 1 · 2026-07-24\n\n"
         "1. owner/repo\n"
+        "功能：用于构建和编排 AI Agent 工作流。\n"
         "综合分 84.23 · 1日 +0★ · 7日 暂无数据\n"
         "https://github.com/owner/repo\n\n"
         "完整日报:\n"
@@ -144,6 +163,7 @@ def test_render_growth_message_stops_before_overflow_without_truncating_links() 
         GrowthEntry(
             rank=rank,
             repository=f"owner/{'r' * 350}-{rank}",
+            introduction="介绍" * 25,
             score="80",
             stars_1d=None,
             stars_7d=None,
@@ -165,6 +185,8 @@ def test_render_growth_message_stops_before_overflow_without_truncating_links() 
         assert entry.repository in message
         assert entry.url in message
     assert entries[rendered_count].repository not in message
+    assert f"功能：{'介' * 29}…" not in message
+    assert f"功能：{('介绍' * 14)}介…" in message
 
 
 def test_daily_notification_sends_growth_text_and_stable_github_url(tmp_path) -> None:
@@ -192,6 +214,7 @@ def test_daily_notification_sends_growth_text_and_stable_github_url(tmp_path) ->
     assert "增长最快 Top 10" in message
     assert "owner/repo-1" in message
     assert "owner/repo-10" in message
+    assert "功能：用于编排 Agent (支持 MCP)." in message
     assert message.endswith("/reports/daily/2026-07-23.md")
 
 
