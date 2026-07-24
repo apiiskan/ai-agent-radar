@@ -6,14 +6,80 @@ import pytest
 from ai_agent_radar.summarize import Summarizer
 
 
-def test_without_key_uses_deterministic_template(repo_factory, score_factory) -> None:
+def test_without_key_uses_deterministic_chinese_template(
+    repo_factory, score_factory
+) -> None:
     result = Summarizer(api_key=None).summarize(
         repo_factory(description="A useful agent skill"), score_factory()
     )
 
     assert result.enhanced is False
-    assert "A useful agent skill" in result.one_line
+    assert result.one_line == "面向 AI Agent 场景的开源工具，提供相关开发能力。"
     assert result.audience == "希望试用相关 Agent 工具的开发者"
+
+
+@pytest.mark.parametrize(
+    ("repo_overrides", "expected"),
+    [
+        (
+            {"description": "用于保护 Agent 工具调用安全。"},
+            "用于保护 Agent 工具调用安全。",
+        ),
+        (
+            {"description": "English", "has_skill_md": True, "has_mcp": True},
+            "提供 Agent Skill 与 MCP 集成，用于扩展智能体工作流。",
+        ),
+        (
+            {"description": "English", "has_skill_md": True},
+            "提供可复用的 Agent Skill，用于扩展 AI 助手能力。",
+        ),
+        (
+            {"description": "English", "has_mcp": True},
+            "提供 MCP 集成，让 AI Agent 能连接和调用外部工具。",
+        ),
+        (
+            {"description": "English", "topics": ("agent-security",)},
+            "用于检测和防护 AI Agent 的安全风险与危险调用。",
+        ),
+        (
+            {"description": "English", "topics": ("observability",)},
+            "用于监控和分析 AI Agent 的运行状态与调用链路。",
+        ),
+        (
+            {"description": "English", "topics": ("multi-agent", "orchestration")},
+            "用于构建和编排 AI Agent 及多智能体工作流。",
+        ),
+        (
+            {"description": "English", "topics": ("automation",)},
+            "为 AI Agent 提供开发工具与自动化能力。",
+        ),
+        (
+            {"description": "English", "topics": ()},
+            "面向 AI Agent 场景的开源工具，提供相关开发能力。",
+        ),
+    ],
+)
+def test_fallback_one_line_is_deterministic_chinese(
+    repo_factory, score_factory, repo_overrides, expected
+) -> None:
+    result = Summarizer(api_key=None).summarize(
+        repo_factory(**repo_overrides), score_factory()
+    )
+
+    assert result.one_line == expected
+    assert len(result.one_line) <= 50
+    assert "English" not in result.one_line
+
+
+def test_fallback_caps_long_chinese_description_at_fifty_characters(
+    repo_factory, score_factory
+) -> None:
+    result = Summarizer(api_key=None).summarize(
+        repo_factory(description="功能" * 40), score_factory()
+    )
+
+    assert len(result.one_line) == 50
+    assert result.one_line.endswith("…")
 
 
 def test_without_key_normalizes_whitespace_only_reasons(repo_factory, score_factory) -> None:
@@ -32,6 +98,7 @@ def test_http_error_falls_back(repo_factory, score_factory) -> None:
     )
 
     assert result.enhanced is False
+    assert result.one_line == "面向 AI Agent 场景的开源工具，提供相关开发能力。"
 
 
 def test_malformed_model_output_falls_back(repo_factory, score_factory) -> None:
@@ -45,6 +112,7 @@ def test_malformed_model_output_falls_back(repo_factory, score_factory) -> None:
     )
 
     assert result.enhanced is False
+    assert result.one_line == "面向 AI Agent 场景的开源工具，提供相关开发能力。"
 
 
 def test_schema_error_in_model_output_falls_back(repo_factory, score_factory) -> None:
