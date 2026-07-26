@@ -22,6 +22,31 @@ def test_daily_workflow_has_schedule_dispatch_permissions_and_concurrency() -> N
     assert workflow["concurrency"]["cancel-in-progress"] is True
 
 
+def test_daily_manual_telegram_test_is_isolated_from_report_generation() -> None:
+    workflow = load_workflow("daily")
+    dispatch = workflow[True]["workflow_dispatch"]
+    telegram_input = dispatch["inputs"]["telegram_test"]
+    telegram_job = workflow["jobs"]["telegram-test"]
+    radar_job = workflow["jobs"]["radar"]
+
+    assert telegram_input["type"] == "boolean"
+    assert telegram_input["default"] is False
+    assert telegram_job["if"] == (
+        "github.event_name == 'workflow_dispatch' && inputs.telegram_test"
+    )
+    assert radar_job["if"] == (
+        "github.event_name != 'workflow_dispatch' || !inputs.telegram_test"
+    )
+    command_step = next(
+        step
+        for step in telegram_job["steps"]
+        if step.get("run") == "ai-agent-radar telegram-test"
+    )
+    assert command_step["env"] == {
+        "TELEGRAM_BOT_TOKEN": "${{ secrets.TELEGRAM_BOT_TOKEN }}"
+    }
+
+
 def test_weekly_workflow_uses_monday_0030_utc() -> None:
     workflow = load_workflow("weekly")
     assert workflow[True]["schedule"][0]["cron"] == "30 0 * * 1"
@@ -65,6 +90,53 @@ def test_degraded_generation_is_committed_before_workflow_returns_nonzero() -> N
         assert publish["if"] == "steps.generate.outputs.exit_code == '0'"
         assert steps.index(publish) < steps.index(finish)
         assert "exit " in finish["run"]
+
+
+def test_daily_workflow_delivers_report_then_alerts_on_failure() -> None:
+    workflow = load_workflow("daily")
+    steps = workflow["jobs"]["radar"]["steps"]
+    publish = next(step for step in steps if step.get("name") == "Publish durable report")
+    notify_daily = next(
+        step for step in steps if step.get("name") == "Send Telegram growth Top 10"
+    )
+    notify_failure = next(
+        step for step in steps if step.get("name") == "Send Telegram failure alert"
+    )
+    finish = next(step for step in steps if step.get("name") == "Propagate generation status")
+
+    assert steps.index(publish) < steps.index(notify_daily)
+    assert steps.index(notify_daily) < steps.index(notify_failure)
+    assert steps.index(notify_failure) < steps.index(finish)
+    assert notify_daily["if"] == (
+        "steps.generate.outputs.exit_code == '0' && success()"
+    )
+    assert notify_daily["run"] == "ai-agent-radar notify daily"
+    assert notify_failure["if"] == (
+        "always() && "
+        "(steps.generate.outputs.exit_code != '0' || failure())"
+    )
+    assert "ai-agent-radar notify failure" in notify_failure["run"]
+    assert "GENERATION_EXIT_CODE" in notify_failure["run"]
+    assert finish["if"] == (
+        "always() && steps.generate.outputs.exit_code != '0'"
+    )
+
+
+def test_daily_telegram_steps_receive_only_telegram_secrets() -> None:
+    steps = load_workflow("daily")["jobs"]["radar"]["steps"]
+    expected_environment = {
+        "TELEGRAM_BOT_TOKEN": "${{ secrets.TELEGRAM_BOT_TOKEN }}",
+        "TELEGRAM_CHAT_ID": "${{ secrets.TELEGRAM_CHAT_ID }}",
+    }
+    for name in ("Send Telegram growth Top 10", "Send Telegram failure alert"):
+        step = next(step for step in steps if step.get("name") == name)
+        assert step["env"]["TELEGRAM_BOT_TOKEN"] == expected_environment[
+            "TELEGRAM_BOT_TOKEN"
+        ]
+        assert step["env"]["TELEGRAM_CHAT_ID"] == expected_environment[
+            "TELEGRAM_CHAT_ID"
+        ]
+        assert "GITHUB_TOKEN" not in step["env"]
 
 
 def test_daily_and_weekly_use_distinct_mode_specific_concurrency_groups() -> None:
