@@ -108,7 +108,10 @@ class Summarizer:
             )
             response.raise_for_status()
             content = json.loads(response.json()["choices"][0]["message"]["content"])
-            return ProjectSummary.model_validate({**content, "enhanced": True})
+            summary = ProjectSummary.model_validate({**content, "enhanced": True})
+            if not _CJK_RE.search(summary.one_line):
+                return fallback
+            return summary
         except (httpx.HTTPError, IndexError, KeyError, TypeError, ValueError):
             return fallback
 
