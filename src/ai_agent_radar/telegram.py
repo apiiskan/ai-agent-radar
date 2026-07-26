@@ -44,8 +44,13 @@ class TelegramPublisher:
             "getUpdates",
             json={"allowed_updates": ["message"]},
         )
+        updates = payload["result"]
+        if not isinstance(updates, list):
+            raise TelegramError("Telegram API returned invalid updates")
         candidates: set[str] = set()
-        for update in payload["result"]:
+        for update in updates:
+            if not isinstance(update, dict):
+                continue
             message = update.get("message")
             if not isinstance(message, dict):
                 continue
@@ -126,13 +131,15 @@ class TelegramPublisher:
                 self._sleep(min(2 ** (attempt - 1), MAX_RETRY_DELAY))
                 continue
 
-            payload = _response_payload(response)
-            if (
-                response.status_code in RETRYABLE_STATUS_CODES
-                and attempt < MAX_ATTEMPTS
-            ):
+            if response.status_code in RETRYABLE_STATUS_CODES:
+                payload = _optional_response_payload(response)
+                if attempt == MAX_ATTEMPTS:
+                    raise TelegramError(
+                        f"Telegram API request failed (HTTP {response.status_code})"
+                    )
                 self._sleep(_retry_delay(response.status_code, payload, attempt))
                 continue
+            payload = _response_payload(response)
             if response.status_code >= 400:
                 raise TelegramError(
                     f"Telegram API request failed (HTTP {response.status_code})"
@@ -146,7 +153,10 @@ class TelegramPublisher:
 
 
 def _is_start_command(text: str) -> bool:
-    command = text.strip().split(maxsplit=1)[0]
+    stripped = text.strip()
+    if not stripped:
+        return False
+    command = stripped.split(maxsplit=1)[0]
     return command.split("@", maxsplit=1)[0] == "/start"
 
 
@@ -165,6 +175,14 @@ def _response_payload(response: httpx.Response) -> dict:
     if not isinstance(payload, dict):
         raise TelegramError("Telegram API returned invalid JSON")
     return payload
+
+
+def _optional_response_payload(response: httpx.Response) -> dict:
+    try:
+        payload = response.json()
+    except ValueError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _retry_delay(status_code: int, payload: dict, attempt: int) -> float:

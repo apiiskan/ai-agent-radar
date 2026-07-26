@@ -160,6 +160,45 @@ def test_english_model_one_line_falls_back_to_chinese(
     assert result.one_line == "面向 AI Agent 场景的开源工具，提供相关开发能力。"
 
 
+@pytest.mark.parametrize(
+    "one_line",
+    [
+        "An agent automation framework 工具",
+        "AIエージェントを自動化するツール",
+    ],
+)
+def test_non_chinese_model_one_line_falls_back(
+    repo_factory, score_factory, one_line
+) -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "one_line": one_line,
+                                    "audience": "开发者",
+                                    "why_now": "近期活跃",
+                                }
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+    )
+
+    result = Summarizer(
+        api_key="secret", client=httpx.Client(transport=transport)
+    ).summarize(repo_factory(description="English"), score_factory())
+
+    assert result.enhanced is False
+    assert result.one_line == "面向 AI Agent 场景的开源工具，提供相关开发能力。"
+
+
 def test_model_prompt_marks_readme_as_untrusted_data(repo_factory, score_factory) -> None:
     captured: dict[str, object] = {}
 

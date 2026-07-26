@@ -82,6 +82,31 @@ def test_bootstrap_refuses_zero_or_ambiguous_private_start_chats(updates) -> Non
     assert "2222" not in message
 
 
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {},
+        [
+            None,
+            {
+                "message": {
+                    "text": "   ",
+                    "chat": {"id": 123456789, "type": "private"},
+                }
+            },
+        ],
+    ],
+)
+def test_bootstrap_handles_malformed_or_blank_updates_as_safe_errors(updates) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ok": True, "result": updates})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        publisher = TelegramPublisher("bot-token", None, client)
+        with pytest.raises(TelegramError):
+            publisher.discover_private_start_chat()
+
+
 def test_telegram_api_failure_is_sanitized() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -223,6 +248,26 @@ def test_telegram_retries_retryable_server_errors(status_code) -> None:
             "bot-token", "123456789", client, sleep=lambda _: None
         )
         assert publisher.send_alert("retry") == 6
+
+    assert attempts == 3
+
+
+@pytest.mark.parametrize("body", ["<html>bad gateway</html>", ""])
+def test_telegram_retries_server_errors_with_non_json_body(body) -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            return httpx.Response(502, text=body)
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": 7}})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        publisher = TelegramPublisher(
+            "bot-token", "123456789", client, sleep=lambda _: None
+        )
+        assert publisher.send_alert("retry") == 7
 
     assert attempts == 3
 

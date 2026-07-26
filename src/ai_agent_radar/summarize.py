@@ -21,6 +21,8 @@ MAX_AUDIENCE_LENGTH = 200
 MAX_WHY_NOW_LENGTH = 1000
 MAX_FALLBACK_ONE_LINE_LENGTH = 50
 _CJK_RE = re.compile(r"[\u3400-\u9fff]")
+_JAPANESE_KANA_RE = re.compile(r"[\u3040-\u30ff]")
+_LATIN_RE = re.compile(r"[A-Za-z]")
 _SECURITY_KEYWORDS = (
     "security",
     "guardrail",
@@ -109,7 +111,7 @@ class Summarizer:
             response.raise_for_status()
             content = json.loads(response.json()["choices"][0]["message"]["content"])
             summary = ProjectSummary.model_validate({**content, "enhanced": True})
-            if not _CJK_RE.search(summary.one_line):
+            if not _is_chinese_intro(summary.one_line):
                 return fallback
             return summary
         except (httpx.HTTPError, IndexError, KeyError, TypeError, ValueError):
@@ -130,7 +132,7 @@ class Summarizer:
 
 def _fallback_one_line(repo: RepoRecord) -> str:
     description = " ".join(repo.description.split())
-    if _CJK_RE.search(description):
+    if _is_chinese_intro(description):
         return _bounded_intro(description)
     if repo.has_skill_md and repo.has_mcp:
         return "提供 Agent Skill 与 MCP 集成，用于扩展智能体工作流。"
@@ -168,3 +170,11 @@ def _bounded_intro(text: str) -> str:
 
 def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
     return any(keyword in text for keyword in keywords)
+
+
+def _is_chinese_intro(text: str) -> bool:
+    if _JAPANESE_KANA_RE.search(text):
+        return False
+    cjk_count = len(_CJK_RE.findall(text))
+    latin_count = len(_LATIN_RE.findall(text))
+    return cjk_count >= 2 and cjk_count / (cjk_count + latin_count) >= 0.25
